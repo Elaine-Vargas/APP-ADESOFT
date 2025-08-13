@@ -95,7 +95,7 @@ const loginVendedor = async (req, res) => {
             IdVendedor: vendedor.IdVendedor,
             NombreV: vendedor.NombreV,
             CedulaV: vendedor.CedulaV,
-        }, process.env.JWT_SECRET || 'w3r9Gv!72JkpX%lQs@8bZ&hMfT0^nAy', { expiresIn: '5m' });
+        }, process.env.JWT_SECRET || 'w3r9Gv!72JkpX%lQs@8bZ&hMfT0^nAy');
         console.log('Token generado:', token);
         res.json({
             mensaje: `Inicio de sesión exitoso, ¡Bienvenido/a ${vendedor.NombreV}!`,
@@ -104,7 +104,7 @@ const loginVendedor = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error en login:', error);
+        console.log('Error en login:', error);
         res.status(500).json({ error: 'Error al iniciar sesión' });
     }
 };

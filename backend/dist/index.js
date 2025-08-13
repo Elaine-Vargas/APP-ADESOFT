@@ -18,7 +18,7 @@ const factura_routes_1 = __importDefault(require("./routes/factura.routes"));
 const cors_1 = __importDefault(require("cors"));
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
-app.use((0, cors_1.default)({ origin: process.env.FRONTEND_URL || 'http://localhost:8082' }));
+app.use((0, cors_1.default)({ origin: process.env.FRONTEND_URL || 'http://localhost:8081' }));
 app.use('/api/productos', producto_routes_1.default);
 app.use('/api/vendedores', vendedor_routes_1.default);
 app.use('/api/clientes', cliente_routes_1.default);
@@ -30,7 +30,7 @@ app.use('/api/referencias-pago', referenciapago_routes_1.default);
 app.use('/api/rutas', rutas_routes_1.default);
 app.use('/api/zonas', zonas_routes_1.default);
 app.use('/api/facturas', factura_routes_1.default);
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
