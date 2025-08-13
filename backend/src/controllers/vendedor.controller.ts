@@ -95,7 +95,6 @@ export const loginVendedor = async (req: Request, res: Response) => {
         CedulaV: vendedor.CedulaV,
       },
       process.env.JWT_SECRET || 'w3r9Gv!72JkpX%lQs@8bZ&hMfT0^nAy',
-      { expiresIn: '5m' }
     );
 
     console.log('Token generado:', token);
@@ -105,8 +104,9 @@ export const loginVendedor = async (req: Request, res: Response) => {
       vendedor, 
       token    
     });
+
   } catch (error) {
-    console.error('Error en login:', error);
+    console.log('Error en login:', error);
     res.status(500).json({ error: 'Error al iniciar sesión' });
   }
 };
