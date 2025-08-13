@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
+    "prebuild": "npm install typescript -g",
     "build": "tsc",
+    "postinstall": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -22,12 +24,12 @@
     "prisma": "^6.12.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.3",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^24.0.15",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.11.28",
+    "prisma": "^5.14.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.0.0"
   }
 }
