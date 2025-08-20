@@ -645,6 +645,13 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 day: 'numeric'
             }).format(new Date(date));
         };
+        const formatDateShort = (date) => {
+            const d = new Date(date);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
         const formatDateTime = (date) => {
             return new Intl.DateTimeFormat('es-DO', {
                 year: 'numeric',
@@ -654,6 +661,18 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 minute: '2-digit',
                 hour12: true
             }).format(new Date(date));
+        };
+        // Helper function to truncate text to fit in 2 lines with ellipsis
+        const truncateTextToLines = (text, maxWidth, fontSize, maxLines = 2) => {
+            const avgCharWidth = fontSize * 0.6; // Approximate character width
+            const maxCharsPerLine = Math.floor(maxWidth / avgCharWidth);
+            const maxTotalChars = maxCharsPerLine * maxLines;
+            if (text.length <= maxTotalChars) {
+                return text;
+            }
+            // Calculate where to cut for ellipsis (leaving space for "...")
+            const cutPoint = maxTotalChars - 3;
+            return text.substring(0, cutPoint) + '...';
         };
         // Generate content based on paper size
         if (selectedPaperSize === 'thermal') {
@@ -687,7 +706,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             currentY += 15;
             doc.fontSize(8);
             doc.text(`Doc: ${docNumber}`, margin, currentY);
-            doc.text(`Fecha: ${formatDate(orden.Fecha)}`, margin + 100, currentY);
+            doc.text(`Fecha: ${formatDateShort(orden.Fecha)}`, margin + 100, currentY);
             currentY += 12;
             // Client info
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
@@ -695,7 +714,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.font('Helvetica-Bold').text('CLIENTE:', margin, currentY);
             currentY += 12;
             doc.font('Helvetica').text(orden.Cliente.NombreC, margin, currentY);
-            currentY += 12;
+            currentY += 36;
             if (orden.Cliente.Rnc) {
                 doc.text(`RNC: ${orden.Cliente.Rnc}`, margin, currentY);
                 currentY += 12;
@@ -703,30 +722,51 @@ const generateFacturaPDFWithSize = async (req, res) => {
             // Items header
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 10;
-            doc.font('Helvetica-Bold');
-            doc.text('PRODUCTO', margin, currentY);
-            doc.text('CANT', margin + 100, currentY);
-            doc.text('PRECIO', margin + 140, currentY);
-            doc.text('TOTAL', margin + 180, currentY);
+            // Column positions for thermal
+            const colProduct = margin;
+            const colCant = margin + 65;
+            const colPrecio = margin + 95;
+            const colTotal = margin + 145;
+            const maxProductWidth = 60;
+            // Draw table header
+            doc.font('Helvetica-Bold').fontSize(8);
+            doc.text('PRODUCTO', colProduct, currentY);
+            doc.text('CANT', colCant, currentY);
+            doc.text('PRECIO', colPrecio, currentY);
+            doc.text('TOTAL', colTotal, currentY);
             currentY += 15;
             // Items
             let total = 0;
             orden.items.forEach(item => {
                 const subtotal = (item.Cantidad || 0) * (item.PrecioV || 0);
                 total += subtotal;
-                doc.font('Helvetica');
-                doc.text(item.producto.NombreP.substring(0, 20), margin, currentY);
-                doc.text(String(item.Cantidad || 0), margin + 100, currentY);
-                doc.text(formatCurrency(item.PrecioV || 0).replace('RD$', ''), margin + 140, currentY);
-                doc.text(formatCurrency(subtotal).replace('RD$', ''), margin + 180, currentY);
-                currentY += 15;
+                doc.font('Helvetica').fontSize(8);
+                // Truncate product name to fit in 2 lines
+                const truncatedProductName = truncateTextToLines(item.producto.NombreP, maxProductWidth, 8);
+                const beforeY = currentY;
+                doc.text(truncatedProductName, colProduct, currentY, {
+                    width: maxProductWidth,
+                    lineGap: 1,
+                    align: 'left'
+                });
+                // Calculate actual height used (max 2 lines)
+                const lineHeight = 9; // fontSize + lineGap
+                const lines = Math.ceil(doc.widthOfString(truncatedProductName) / maxProductWidth);
+                const actualLines = Math.min(lines, 2);
+                const productHeight = actualLines * lineHeight;
+                // Other columns aligned with first line
+                doc.text(String(item.Cantidad || 0), colCant, beforeY);
+                doc.text(formatCurrency(item.PrecioV || 0).replace('RD$', ''), colPrecio, beforeY);
+                doc.text(formatCurrency(subtotal).replace('RD$', ''), colTotal, beforeY);
+                // Advance Y with more spacing between products
+                currentY = beforeY + productHeight + 8; // Increased spacing from 5 to 8
             });
             // Total
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 10;
             doc.font('Helvetica-Bold');
             doc.text('TOTAL:', margin, currentY);
-            doc.text(formatCurrency(total), margin + 180, currentY);
+            doc.text(formatCurrency(total), margin + 130, currentY);
             currentY += 20;
             // Footer
             doc.font('Helvetica').fontSize(7);
@@ -737,7 +777,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.text(`Impreso: ${formatDateTime(new Date())}`, margin, currentY, center);
         }
         else {
-            // Letter size layout (matching A4 format structure)
+            // Letter size layout
             const headerY = 60;
             const companyInfoX = 60;
             const documentInfoX = 400;
@@ -745,7 +785,6 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.fontSize(16).font('Helvetica-Bold').text(config.Compania, companyInfoX, headerY);
             doc.fontSize(10).font('Helvetica');
             let companyY = headerY + 20;
-            // Combine address lines with semicolon separator
             let addressLine = '';
             if (config.Direccion1) {
                 addressLine += config.Direccion1;
@@ -773,10 +812,9 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.text(`Fecha: ${formatDate(orden.Fecha)}`, documentInfoX, headerY + 20);
             doc.text(`Fecha de Creación: ${formatDateTime(orden.FechaCreacion || new Date())}`, documentInfoX, headerY + 35);
             doc.moveDown(2);
-            // Client and Vendor information stacked vertically
+            // Client and Vendor information
             const infoX = 60;
             let currentY = doc.y;
-            // Client information section
             doc.fontSize(12).font('Helvetica-Bold').text('CLIENTE', infoX, currentY);
             doc.fontSize(10).font('Helvetica');
             currentY += 20;
@@ -790,9 +828,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 doc.text(`Teléfono: ${orden.Cliente.TelefonoC}`, infoX, currentY);
                 currentY += 15;
             }
-            // Add some space between client and vendor sections
             currentY += 10;
-            // Vendor information section (below client)
             doc.fontSize(12).font('Helvetica-Bold').text('VENDEDOR', infoX, currentY);
             doc.fontSize(10).font('Helvetica');
             currentY += 20;
@@ -802,16 +838,13 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 doc.text(`Teléfono: ${orden.Vendedor.TelefonoV}`, infoX, currentY);
                 currentY += 15;
             }
-            // Update document position for next section
             doc.y = currentY;
             doc.moveDown(2);
-            // Items table with better formatting
+            // Items table
             doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('DETALLES DE LA FACTURA');
             doc.moveDown(0.5);
-            // Table headers with background
             const tableY = doc.y;
             const colX = [60, 200, 280, 350, 420, 490];
-            // Header background
             doc.rect(60, tableY - 5, 495, 25).fill('#f0f0f0');
             doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
             doc.text('Producto', colX[0], tableY);
@@ -820,10 +853,8 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.text('Impuesto', colX[3], tableY);
             doc.text('Subtotal', colX[4], tableY);
             doc.text('ITBIS', colX[5], tableY);
-            // Draw header line
             doc.moveTo(60, tableY + 20).lineTo(555, tableY + 20).stroke();
             doc.moveDown(0.5);
-            // Items rows with alternating background
             let tableRowY = doc.y;
             let totalSubtotal = 0;
             let totalITBIS = 0;
@@ -834,28 +865,38 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 const tipoImpuesto = config.TipoImpuesto === 'A' ? 'Aplicado' : 'Incluido';
                 totalSubtotal += subtotal;
                 totalITBIS += itbis;
-                // Alternate row background
+                const productColumnWidth = colX[1] - colX[0] - 5; // Width of product column
+                // Truncate product name to fit in 2 lines
+                const truncatedProductName = truncateTextToLines(item.producto.NombreP, productColumnWidth, 9);
+                // Calculate row height needed for alternating background
+                const lineHeight = 10; // fontSize + lineGap
+                const lines = Math.ceil(doc.widthOfString(truncatedProductName) / productColumnWidth);
+                const actualLines = Math.min(lines, 2);
+                const rowHeight = Math.max(20, actualLines * lineHeight + 5); // Minimum 20px height
                 if (rowCount % 2 === 0) {
-                    doc.rect(60, tableRowY - 5, 495, 20).fill('#fafafa');
+                    doc.rect(60, tableRowY - 5, 495, rowHeight).fill('#fafafa');
                 }
-                // Ensure text color is black for visibility
                 doc.fontSize(9).font('Helvetica').fillColor('black');
-                doc.text(item.producto.NombreP.substring(0, 25), colX[0], tableRowY);
-                doc.text(String(item.Cantidad || 0), colX[1], tableRowY);
-                doc.text(formatCurrency(item.PrecioV || 0), colX[2], tableRowY);
-                doc.text(tipoImpuesto, colX[3], tableRowY);
-                doc.text(formatCurrency(subtotal), colX[4], tableRowY);
-                doc.text(formatCurrency(itbis), colX[5], tableRowY);
-                tableRowY += 25;
+                const beforeY = tableRowY;
+                doc.text(truncatedProductName, colX[0], tableRowY, {
+                    width: productColumnWidth,
+                    lineGap: 1,
+                    align: 'left'
+                });
+                // Other columns aligned with first line
+                doc.text(String(item.Cantidad || 0), colX[1], beforeY);
+                doc.text(formatCurrency(item.PrecioV || 0), colX[2], beforeY);
+                doc.text(tipoImpuesto, colX[3], beforeY);
+                doc.text(formatCurrency(subtotal), colX[4], beforeY);
+                doc.text(formatCurrency(itbis), colX[5], beforeY);
+                // Advance Y with more spacing between products
+                tableRowY = beforeY + rowHeight + 3; // Increased spacing
                 rowCount++;
             });
-            // Draw bottom line
             doc.moveTo(60, tableRowY + 5).lineTo(555, tableRowY + 5).stroke();
             doc.moveDown(5);
-            // Totals section with better formatting
             const totalsY = doc.y;
             doc.rect(350, totalsY - 10, 205, 80).stroke();
-            // Ensure text color is black for totals
             doc.fontSize(12).font('Helvetica-Bold').fillColor('black');
             doc.text('TOTALES', 360, totalsY);
             doc.fontSize(10).font('Helvetica').fillColor('black');
@@ -863,7 +904,6 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.text(`ITBIS: ${formatCurrency(totalITBIS)}`, 360, totalsY + 35);
             doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
             doc.text(`TOTAL: ${formatCurrency(orden.Total || 0)}`, 360, totalsY + 55);
-            // Footer with user and print information in gray
             doc.moveDown(2);
             doc.fontSize(9).font('Helvetica').fillColor('#666666').text(`Vendedor: ${orden.Vendedor.NombreV} - Fecha de impresión: ${formatDateTime(new Date())}`, { align: 'center' });
         }
