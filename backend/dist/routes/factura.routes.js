@@ -6,10 +6,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const factura_controller_1 = require("../controllers/factura.controller");
 const router = express_1.default.Router();
-// Generate PDF invoice for an order
-router.get('/pdf/:id', factura_controller_1.generateFacturaPDF);
+router.get('/test', (req, res) => {
+    res.json({ message: 'Test route works!' });
+});
 // Generate PDF invoice with improved design
-router.get('/pdf-improved/:id', factura_controller_1.generateFacturaPDFImproved);
+router.get('/pdf/:id', factura_controller_1.generateFacturaPDF);
+router.get('/pdf-sized/:id', factura_controller_1.generateFacturaPDFWithSize);
 // Get invoice data without generating PDF
 router.get('/data/:id', factura_controller_1.getFacturaData);
 // Generate PDF for IN transaction (payment receipt)
