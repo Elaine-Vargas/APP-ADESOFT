@@ -9,9 +9,7 @@ const router = express_1.default.Router();
 router.get('/test', (req, res) => {
     res.json({ message: 'Test route works!' });
 });
-// Generate PDF invoice with improved design
-router.get('/pdf/:id', factura_controller_1.generateFacturaPDF);
-router.get('/pdf-sized/:id', factura_controller_1.generateFacturaPDFWithSize);
+router.get('/pdf/:id', factura_controller_1.generateFacturaPDFWithSize);
 // Get invoice data without generating PDF
 router.get('/data/:id', factura_controller_1.getFacturaData);
 // Generate PDF for IN transaction (payment receipt)

@@ -79,10 +79,27 @@ const getNextDocumentoIN = async (): Promise<string> => {
 
   return nextId;
 };
+// Paper size configurations
+const PAPER_CONFIGS = {
+  letter: {
+    size: 'LETTER' as const,
+    width: 612,
+    height: 792,
+    margin: 40,
+    contentWidth: 512
+  },
+  thermal: {
+    size: [216, 1000] as [number, number], // 3 inch width (216 points), variable height
+    width: 216,
+    height: 1000,
+    margin: 10,
+    contentWidth: 196
+  }
+};
 
 export const generateFacturaTransaccionIN = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { action = 'download' } = req.query; // 'download' or 'print'
+  const { action = 'download', paperSize = 'thermal' } = req.query; // 'download' or 'print', default thermal
   
   try {
     // Get transaction
@@ -102,6 +119,9 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
     const cliente = await prisma.cliente.findUnique({
       where: { IdCliente: transaccion.IdCliente }
     });
+    const vendedor = await prisma.vendedor.findUnique({
+      where: { IdVendedor: transaccion.IdVendedor }
+    });
 
     // Get payment references
     const referencias = await prisma.referenciaPago.findMany({
@@ -114,14 +134,20 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       return res.status(404).json({ message: 'Configuración de empresa no encontrada' });
     }
 
-    // Create PDF document with better margins
+    // Validate paper size
+    const validPaperSizes = ['letter', 'thermal'];
+    const selectedPaperSize = validPaperSizes.includes(paperSize as string) ? paperSize as string : 'letter';
+    const paperConfig = PAPER_CONFIGS[selectedPaperSize as keyof typeof PAPER_CONFIGS];
+
+    // Create PDF document with appropriate size
     const doc = new PDFDocument({
-      size: 'A4',
-      margin: 40
+      size: paperConfig.size,
+      margin: paperConfig.margin
     });
 
     // Set response headers for PDF
-    const fileName = `RECIBO-${String(transaccion.IdTransa).padStart(8, '0')}.pdf`;
+    const sizePrefix = selectedPaperSize === 'thermal' ? 'RECIBO-THERMAL' : 'RECIBO';
+    const fileName = `${sizePrefix}-${String(transaccion.IdTransa).padStart(8, '0')}.pdf`;
     
     if (action === 'print') {
       res.setHeader('Content-Type', 'application/pdf');
@@ -134,7 +160,7 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
     // Pipe PDF directly to response
     doc.pipe(res);
 
-    // Helper function to format date
+    // Helper functions
     const formatDate = (date: Date | string | null | undefined): string => {
       if (!date) return 'N/A';
       try {
@@ -150,7 +176,20 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       }
     };
 
-    // Helper function to format date and time
+    const formatDateShort = (date: Date | string | null | undefined): string => {
+      if (!date) return 'N/A';
+      try {
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return 'N/A';
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+      } catch (e) {
+        return 'N/A';
+      }
+    };
+
     const formatDateTime = (date: Date | string | null | undefined): string => {
       if (!date) return 'N/A';
       try {
@@ -169,7 +208,6 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       }
     };
 
-    // Helper function to format currency
     const formatCurrency = (amount: number | null | undefined): string => {
       if (amount === null || amount === undefined) return 'RD$ 0.00';
       return new Intl.NumberFormat('es-DO', {
@@ -178,197 +216,383 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       }).format(amount);
     };
 
-    // Header section with company info on left and document info on right
-    const headerY = 60;
-    const companyInfoX = 60;
-    const documentInfoX = 400;
-    
-    // Company information on the left
-    doc.fontSize(16).font('Helvetica-Bold').text(config.Compania, companyInfoX, headerY);
-    doc.fontSize(10).font('Helvetica');
-    
-    let companyY = headerY + 20;
-    
-    // Combine address lines with semicolon separator
-    let addressLine = '';
-    if (config.Direccion1) addressLine += config.Direccion1;
-    if (config.Direccion2) {
-      if (addressLine) addressLine += '; ';
-      addressLine += config.Direccion2;
-    }
-    
-    if (addressLine) {
-      doc.text(addressLine, companyInfoX, companyY, { width: 300 });
-      companyY += 15;
-    }
-    
-    if (config.Telefono) {
-      doc.text(`Tel: ${config.Telefono}`, companyInfoX, companyY);
-      companyY += 15;
-    }
-    
-    if (config.Rnc) {
-      doc.text(`RNC: ${config.Rnc}`, companyInfoX, companyY);
-    }
-
-    // Document information on the right
-    const docNumber = transaccion.Documento || transaccion.IdTransa.toString().padStart(8, '0');
-    doc.fontSize(12).font('Helvetica-Bold').text(`Documento: ${docNumber}`, documentInfoX, headerY);
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`Fecha: ${formatDate(transaccion.Fecha)}`, documentInfoX, headerY + 20);
-    
-    // Show Documento VE if it exists in the references
-    if (referencias && referencias.length > 0 && referencias[0].DocumentoVE) {
-      doc.text(`Doc. Venta: ${referencias[0].DocumentoVE}`, documentInfoX, headerY + 40);
-    }
-    
-    // Main header centered below company info
-    doc.fontSize(18)
-       .font('Helvetica-Bold')
-       .text('RECIBO DE PAGO', companyInfoX, companyY + 40, { 
-         align: 'left',
-         width: doc.page.width - 100,
-         lineGap: 2
-       });
-    
-    // Reset Y position for the rest of the content
-    let docY = companyY + 80;
-    
-    docY += 15;
-    // Client information
-    docY += 10;
-    doc.fontSize(10)
-       .font('Helvetica-Bold')
-       .text('Cliente:', 50, docY)
-       .font('Helvetica')
-       .text(cliente?.NombreC || 'N/A', 100, docY);
-
-    
-    docY += 20;
-
-    // Line separator with better styling
-    doc.moveTo(50, docY - 10).lineTo(550, docY - 10).lineWidth(1).stroke('#cccccc');
-    doc.moveTo(50, docY - 9).lineTo(550, docY - 9).lineWidth(1).stroke('#ffffff');
-    docY += 15;
-
-    // Payment details section header
-    doc.rect(50, docY, 500, 25).fill('#f0f0f0');
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#333333')
-       .text('DETALLE DE PAGO', 60, docY + 5);
-    docY += 30;
-
-    // Payment methods table
-    const paymentMethods = [
-      { name: 'Efectivo', value: transaccion.Efectivo || 0 },
-      { name: 'Tarjeta', value: transaccion.Tarjeta || 0 },
-      { name: 'Cheque', value: transaccion.Cheque || 0 },
-      { name: 'Transferencia', value: transaccion.Transferencia || 0 }
-    ].filter(method => method.value > 0);
-
-    // Table header
-    doc.font('Helvetica-Bold').fillColor('#333333');
-    doc.text('MÉTODO DE PAGO', 60, docY);
-    doc.text('MONTO', 400, docY, { width: 100, align: 'right' });
-    
-    docY += 20;
-    
-    // Table rows
-    paymentMethods.forEach((method, index) => {
-      const rowY = docY + (index * 20);
+    // Helper function to split text into two lines for thermal printing
+    const splitTextIntoTwoLines = (text: string, maxWidth: number, fontSize: number): string[] => {
+      const avgCharWidth = fontSize * 0.6;
+      const maxCharsPerLine = Math.floor(maxWidth / avgCharWidth);
       
-      // Alternate row background
-      if (index % 2 === 0) {
-        doc.rect(50, rowY - 5, 500, 20).fill('#f9f9f9');
+      if (text.length <= maxCharsPerLine) {
+        return [text, ''];
       }
       
-      doc.font('Helvetica').fillColor('#333333')
-         .text(method.name, 60, rowY)
-         .text(formatCurrency(method.value), 400, rowY, { width: 100, align: 'right' });
+      const idealBreak = maxCharsPerLine;
+      let breakPoint = idealBreak;
       
-      // Add separator line
-      doc.moveTo(50, rowY + 15).lineTo(550, rowY + 15).lineWidth(0.5).stroke('#eeeeee');
-    });
+      for (let i = idealBreak; i >= Math.floor(idealBreak * 0.7); i--) {
+        if (text[i] === ' ') {
+          breakPoint = i;
+          break;
+        }
+      }
+      
+      if (breakPoint === idealBreak && text[idealBreak] !== ' ') {
+        while (breakPoint > Math.floor(idealBreak * 0.7) && text[breakPoint] !== ' ') {
+          breakPoint--;
+        }
+        if (breakPoint <= Math.floor(idealBreak * 0.7)) {
+          breakPoint = idealBreak;
+        }
+      }
+      
+      const firstLine = text.substring(0, breakPoint).trim();
+      let secondLine = text.substring(breakPoint).trim();
+      
+      if (secondLine.length > maxCharsPerLine) {
+        secondLine = secondLine.substring(0, maxCharsPerLine).trim();
+      }
+      
+      return [firstLine, secondLine];
+    };
 
-    // Total
-    const totalY = docY + (paymentMethods.length * 20) + 10;
-    doc.moveTo(350, totalY - 5).lineTo(550, totalY - 5).stroke('#cccccc');
-    
-    doc.font('Helvetica-Bold').fontSize(12)
-       .text('TOTAL PAGADO:', 350, totalY + 5)
-       .fontSize(14)
-       .text(formatCurrency(transaccion.Valor || 0), 400, totalY, { width: 150, align: 'right' });
+    // Generate content based on paper size
+    if (selectedPaperSize === 'thermal') {
+      // Thermal receipt layout
+      let currentY = 10;
+      const margin = paperConfig.margin;
+      const contentWidth = paperConfig.contentWidth;
+      const center = { width: contentWidth, align: 'center' as const };
 
-    // Reference payment details
-    let refY = totalY + 40;
-    
-    if (referencias && referencias.length > 0) {
-      // Section header
-      doc.rect(50, refY, 500, 25).fill('#f0f0f0');
+      // Company header
+      doc.fontSize(10).font('Helvetica-Bold').text(config.Compania, margin, currentY, center);
+      currentY += 15;
+
+      // Address and company info
+      doc.fontSize(8);
+      if (config.Direccion1) {
+        doc.text(config.Direccion1, margin, currentY, center);
+        currentY += 10;
+      }
+      if (config.Telefono) {
+        doc.text(`Tel: ${config.Telefono}`, margin, currentY, center);
+        currentY += 10;
+      }
+      if (config.Rnc) {
+        doc.text(`RNC: ${config.Rnc}`, margin, currentY, center);
+        currentY += 15;
+      }
+      
+      // Document info
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 10;
+      
+      const docNumber = transaccion.Documento || transaccion.IdTransa.toString().padStart(8, '0');
+      doc.fontSize(10).font('Helvetica-Bold').text('RECIBO DE PAGO', margin, currentY, center);
+      currentY += 15;
+      
+      doc.fontSize(8);
+      doc.text(`Doc: ${docNumber}`, margin, currentY);
+      doc.text(`Fecha: ${formatDateShort(transaccion.Fecha)}`, margin + 100, currentY);
+      currentY += 12;
+      
+      // Client info
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 10;
+
+      const clientName = cliente?.NombreC || 'N/A';
+      const clientLines = splitTextIntoTwoLines(clientName, 140, 8);
+      const clientText = 'CLIENTE: ' + clientLines[0];
+      const clientTextWidth = doc.widthOfString(clientText);
+      doc.font('Helvetica-Bold').text(clientText, margin, currentY + 12, { width: clientTextWidth });
+      if (clientLines[1]) {
+        currentY += 12;
+        doc.text(clientLines[1], margin, currentY + 12);
+      }
+      currentY += 12;
+     
+      // VENDOR information
+      const vendorName = vendedor?.NombreV || 'N/A';
+      const vendorLines = splitTextIntoTwoLines(vendorName, 140, 8);
+      const vendorText = 'VENDEDOR: ' + vendorLines[0];
+      const vendorTextWidth = doc.widthOfString(vendorText);
+      doc.font('Helvetica-Bold').text(vendorText, margin, currentY + 12, { width: vendorTextWidth });
+      if (vendorLines[1]) {
+        currentY += 12;
+        doc.text(vendorLines[1], margin, currentY + 12);
+      }
+      currentY += 12;
+      // Show Document VE if exists
+      if (referencias && referencias.length > 0 && referencias[0].DocumentoVE) {
+        doc.font('Helvetica-Bold').text('Doc. Venta:', margin, currentY);
+        doc.font('Helvetica').text(referencias[0].DocumentoVE, margin + 55, currentY);
+        currentY += 18;
+      }
+
+      // Payment methods section
+      currentY += 10;
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 8;
+
+      doc.font('Helvetica-Bold').fontSize(8);
+      doc.text('METODO PAGO', margin, currentY);
+      const montoText = 'MONTO';
+      const montoX = margin + contentWidth - doc.widthOfString(montoText);
+      doc.text(montoText, montoX, currentY);
+      currentY += 12;
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 8;
+      
+      // Payment methods
+      const paymentMethods = [
+        { name: 'Efectivo', value: transaccion.Efectivo || 0 },
+        { name: 'Tarjeta', value: transaccion.Tarjeta || 0 },
+        { name: 'Cheque', value: transaccion.Cheque || 0 },
+        { name: 'Transferencia', value: transaccion.Transferencia || 0 }
+      ].filter(method => method.value > 0);
+
+      doc.font('Helvetica').fontSize(8);
+      paymentMethods.forEach((method) => {
+        doc.text(method.name, margin, currentY);
+        const amountText = formatCurrency(method.value).replace('RD$', '').trim();
+        const amountX = margin + contentWidth - doc.widthOfString(amountText);
+        doc.text(amountText, amountX, currentY);
+        currentY += 12;
+      });
+
+      // Total
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 10;
+      
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('TOTAL PAGADO:', margin, currentY);
+      const totalText = formatCurrency(transaccion.Valor || 0).replace('RD$', '').trim();
+      const totalX = margin + contentWidth - doc.widthOfString(totalText);
+      doc.text(totalText, totalX, currentY);
+      currentY += 20;
+
+      // Reference payment details (if any)
+      if (referencias && referencias.length > 0) {
+        doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+        currentY += 10;
+        
+        doc.font('Helvetica-Bold').fontSize(8);
+        doc.text('REFERENCIAS DE PAGO:', margin, currentY, center);
+        currentY += 15;
+        
+        referencias.forEach((ref: any, idx: number) => {
+          doc.font('Helvetica').fontSize(7);
+          
+          if (ref.DocumentoIN) {
+            doc.text(`Doc: ${ref.DocumentoIN}`, margin, currentY);
+            currentY += 10;
+          }
+          
+          doc.text(`Monto: ${formatCurrency(Number(ref.ValorPago))}`, margin, currentY);
+          currentY += 10;
+          
+          if (ref.CreatedAt) {
+            doc.text(`Fecha: ${formatDateTime(ref.CreatedAt)}`, margin, currentY);
+            currentY += 10;
+          }
+          
+          if (ref.DocumentoVE) {
+            doc.text(`Aplicado a: ${ref.DocumentoVE}`, margin, currentY);
+            currentY += 10;
+          }
+          
+          if (idx < referencias.length - 1) {
+            currentY += 8; // Space between references
+          }
+        });
+      }
+      
+      // Footer
+      currentY += 20;
+      doc.font('Helvetica').fontSize(7);
+      doc.text('Gracias por su pago', margin, currentY, center);
+      currentY += 15;
+      doc.text(`Impreso: ${formatDateTime(new Date())}`, margin, currentY, center);
+
+    } else {
+      // Letter size layout (original layout)
+      const headerY = 60;
+      const companyInfoX = 60;
+      const documentInfoX = 400;
+      
+      // Company information on the left
+      doc.fontSize(16).font('Helvetica-Bold').text(config.Compania, companyInfoX, headerY);
+      doc.fontSize(10).font('Helvetica');
+      
+      let companyY = headerY + 20;
+      
+      // Combine address lines with semicolon separator
+      let addressLine = '';
+      if (config.Direccion1) addressLine += config.Direccion1;
+      if (config.Direccion2) {
+        if (addressLine) addressLine += '; ';
+        addressLine += config.Direccion2;
+      }
+      
+      if (addressLine) {
+        doc.text(addressLine, companyInfoX, companyY, { width: 300 });
+        companyY += 15;
+      }
+      
+      if (config.Telefono) {
+        doc.text(`Tel: ${config.Telefono}`, companyInfoX, companyY);
+        companyY += 15;
+      }
+      
+      if (config.Rnc) {
+        doc.text(`RNC: ${config.Rnc}`, companyInfoX, companyY);
+      }
+
+      // Document information on the right
+      const docNumber = transaccion.Documento || transaccion.IdTransa.toString().padStart(8, '0');
+      doc.fontSize(12).font('Helvetica-Bold').text(`Documento: ${docNumber}`, documentInfoX, headerY);
+      doc.fontSize(10).font('Helvetica');
+      doc.text(`Fecha: ${formatDate(transaccion.Fecha)}`, documentInfoX, headerY + 20);
+      
+      // Show Documento VE if it exists in the references
+      if (referencias && referencias.length > 0 && referencias[0].DocumentoVE) {
+        doc.text(`Doc. Venta: ${referencias[0].DocumentoVE}`, documentInfoX, headerY + 40);
+      }
+      
+      // Main header centered below company info
+      doc.fontSize(18)
+         .font('Helvetica-Bold')
+         .text('RECIBO DE PAGO', companyInfoX, companyY + 40, { 
+           align: 'left',
+           width: doc.page.width - 100,
+           lineGap: 2
+         });
+      
+      // Reset Y position for the rest of the content
+      let docY = companyY + 60;
+
+      // Client information
+      docY += 10;
+      doc.fontSize(10)
+         .font('Helvetica-Bold')
+         .text('Cliente:', 60, docY)
+         .font('Helvetica')
+         .text(cliente?.NombreC || 'N/A', 100, docY);
+
+      docY += 20;
+
+      doc.fontSize(10)
+      .font('Helvetica-Bold')
+      .text('Vendedor:', 60, docY)
+      .font('Helvetica')
+      .text(vendedor?.NombreV || 'N/A', 115, docY);
+   docY += 40;
+      // Line separator with better styling
+      doc.moveTo(50, docY - 10).lineTo(550, docY - 10).lineWidth(1).stroke('#cccccc');
+      doc.moveTo(50, docY - 9).lineTo(550, docY - 9).lineWidth(1).stroke('#ffffff');
+      docY += 15;
+
+
+       // Concepto
+       doc.font('Helvetica-Bold').fillColor('#333333');
+       doc.text(`CONCEPTO: ${transaccion.Concepto}`, 60, docY);       
+       docY += 20;
+
+      // Payment details section header
+      doc.rect(50, docY, 500, 25).fill('#f0f0f0');
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#333333')
-         .text('REFERENCIAS DE PAGO', 60, refY + 5);
+         .text('DETALLE DE PAGO', 60, docY + 5);
+      docY += 30;
+
+      // Payment methods table
+      const paymentMethods = [
+        { name: 'Efectivo', value: transaccion.Efectivo || 0 },
+        { name: 'Tarjeta', value: transaccion.Tarjeta || 0 },
+        { name: 'Cheque', value: transaccion.Cheque || 0 },
+        { name: 'Transferencia', value: transaccion.Transferencia || 0 }
+      ].filter(method => method.value > 0);
+
+      // Table header
+      doc.font('Helvetica-Bold').fillColor('#333333');
+      doc.text('MÉTODO DE PAGO', 60, docY);
+      doc.text('MONTO', 450, docY, { width: 100, align: 'right' });
       
-      refY += 30;
+      docY += 20;
       
-      // Reference items
-      referencias.forEach((ref: any, idx: number) => {
-        const refItemY = refY + (idx * 70);
+      // Table rows
+      paymentMethods.forEach((method, index) => {
+        const rowY = docY + (index * 20);
         
-        // Card-like container
-        doc.roundedRect(50, refItemY, 500, 65, 5)
-           .fill('#f9f9f9')
-           .stroke('#eeeeee');
-        
-        // Document info
-        doc.font('Helvetica-Bold').fontSize(10)
-           .text('DOCUMENTO:', 60, refItemY + 10)
-           .font('Helvetica')
-           .text(ref.DocumentoIN || 'N/A', 150, refItemY + 10);
-        
-        // Amount
-        doc.font('Helvetica-Bold').fontSize(10)
-           .text('MONTO:', 60, refItemY + 25)
-           .font('Helvetica')
-           .text(formatCurrency(Number(ref.ValorPago)), 150, refItemY + 25);
-        
-        // Date
-        doc.font('Helvetica-Bold').fontSize(10)
-           .text('FECHA:', 60, refItemY + 40)
-           .font('Helvetica')
-           .text(formatDateTime(ref.CreatedAt || null), 150, refItemY + 40);
-        
-        // Applied to invoice (if applicable)
-        if (ref.DocumentoVE) {
-          doc.font('Helvetica-Bold').fontSize(10)
-             .text('APLICADO A FACTURA:', 300, refItemY + 25)
-             .font('Helvetica')
-             .text(ref.DocumentoVE, 440, refItemY + 25, { width: 100, align: 'right' });
+        // Alternate row background
+        if (index % 2 === 0) {
+          doc.rect(50, rowY - 5, 500, 20).fill('#f9f9f9');
         }
         
-        refY += 75; // Add some space between reference items
+        doc.font('Helvetica').fillColor('#333333')
+           .text(method.name, 60, rowY)
+           .text(formatCurrency(method.value), 450, rowY, { width: 100, align: 'right' });
+        
+        // Add separator line
+        doc.moveTo(50, rowY + 15).lineTo(550, rowY + 15).lineWidth(0.5).stroke('#eeeeee');
       });
+
+      // Total
+      const totalY = docY + (paymentMethods.length * 20) + 10;
+      doc.moveTo(350, totalY - 5).lineTo(550, totalY - 5).stroke('#cccccc');
+      
+      doc.font('Helvetica-Bold').fontSize(12)
+         .text('TOTAL PAGADO:', 350, totalY + 1)
+         .fontSize(14)
+         .text(formatCurrency(transaccion.Valor || 0), 400, totalY, { width: 150, align: 'right' });
+
+      // Reference payment details
+      let refY = totalY + 40;
+      
+      if (referencias && referencias.length > 0) {
+        // Section header
+        doc.rect(50, refY, 500, 25).fill('#f0f0f0');
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#333333')
+           .text('Gracias por su Pago', 60, refY + 5);
+        
+        refY += 30;
+        
+        // Reference items
+        referencias.forEach((ref: any, idx: number) => {
+          const refItemY = refY + (idx * 70);
+          
+          // Card-like container
+          doc.roundedRect(50, refItemY, 500, 65, 5)
+             .fill('#f9f9f9')
+             .stroke('#eeeeee');
+          
+          // Document info
+          doc.font('Helvetica-Bold').fontSize(10)
+             .text('DOCUMENTO:', 60, refItemY + 10)
+             .font('Helvetica')
+             .text(ref.DocumentoIN || 'N/A', 150, refItemY + 10);
+          
+          // Amount
+          doc.font('Helvetica-Bold').fontSize(10)
+          .text('MONTO:', 140, refItemY + 25, { align: 'right', width: 80 })
+          .font('Helvetica')
+          .text(formatCurrency(Number(ref.ValorPago)), 150, refItemY + 25);
+          
+          // Date
+          doc.font('Helvetica-Bold').fontSize(10)
+             .text('FECHA:', 60, refItemY + 40)
+             .font('Helvetica')
+             .text(formatDateTime(ref.CreatedAt || null), 150, refItemY + 40);
+          
+          // Applied to invoice (if applicable)
+          if (ref.DocumentoVE) {
+            doc.font('Helvetica-Bold').fontSize(10)
+               .text('APLICADO A COTIZACION:', 300, refItemY + 25)
+               .font('Helvetica')
+               .text(ref.DocumentoVE, 440, refItemY + 25, { width: 100, align: 'right' });
+          }
+          
+          refY += 75; // Add some space between reference items
+        });
+      }
     }
-
-    // Footer with thank you message
-    const footerY = 750;
-    doc.fontSize(10).font('Helvetica')
-       .fillColor('#666666')
-       .text('Gracias por su pago', 50, footerY, { align: 'center', width: 500 });
-    
-    // Add company info at the bottom with better styling
-    const footerText = [
-      config.Compania,
-      config.Direccion1,
-      config.Telefono ? `Tel: ${config.Telefono}` : '',
-      config.Rnc ? `RNC: ${config.Rnc}` : ''
-    ].filter(Boolean).join(' | ');
-    
-    doc.fontSize(8).fillColor('#999999')
-       .text(footerText, 50, 780, { 
-         align: 'center', 
-         width: 500,
-         lineGap: 2
-       });
-
     // Finalize the PDF
     doc.end();
 
@@ -437,264 +661,9 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
   }
 };
 
-export const generateFacturaPDF = async (req: Request, res: Response) => {
-  const { id } = req.params;
-  
-  try {
-    // Get order with all related data
-    const orden = await prisma.orden.findUnique({
-      where: { IdOrden: parseInt(id) },
-      include: { 
-        items: { 
-          include: { producto: true } 
-        }, 
-        Cliente: true, 
-        Vendedor: true 
-      }
-    });
-
-    if (!orden) {
-      return res.status(404).json({ message: 'Orden no encontrada' });
-    }
-
-    // Get company configuration
-    const config = await prisma.config.findFirst();
-    if (!config) {
-      return res.status(404).json({ message: 'Configuración de empresa no encontrada' });
-    }
-
-    // Create PDF document with better margins
-    const doc = new PDFDocument({
-      size: 'A4',
-      margin: 40
-    });
-
-    // Set response headers for PDF download
-    const fileName = `FACT-${String(orden.IdOrden).padStart(8, '0')}.pdf`;
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    
-    // Pipe PDF directly to response
-    doc.pipe(res);
-
-    // Helper functions
-    const formatDocumentNumber = (id: number): string => {
-      return String(id).padStart(8, '0');
-    };
-
-    const formatCurrency = (amount: number): string => {
-      return new Intl.NumberFormat('es-DO', {
-        style: 'currency',
-        currency: 'DOP'
-      }).format(amount);
-    };
-
-    const formatDate = (date: Date): string => {
-      return new Intl.DateTimeFormat('es-DO', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }).format(new Date(date));
-    };
-
-    const formatDateTime = (date: Date): string => {
-      return new Intl.DateTimeFormat('es-DO', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      }).format(new Date(date));
-    };
-
-    // Header section with company info on left and document info on right
-    const headerY = 60;
-    const companyInfoX = 60;
-    const documentInfoX = 400;
-    
-    // Company information on the left
-    doc.fontSize(16).font('Helvetica-Bold').text(config.Compania, companyInfoX, headerY);
-    doc.fontSize(10).font('Helvetica');
-    
-    let companyY = headerY + 20;
-    
-    // Combine address lines with semicolon separator
-    let addressLine = '';
-    if (config.Direccion1) {
-      addressLine += config.Direccion1;
-    }
-    if (config.Direccion2) {
-      if (addressLine) addressLine += '; ';
-      addressLine += config.Direccion2;
-    }
-    if (addressLine) {
-      doc.text(addressLine, companyInfoX, companyY);
-      companyY += 15;
-    }
-    
-    if (config.Telefono) {
-      doc.text(`Tel: ${config.Telefono}`, companyInfoX, companyY);
-      companyY += 15;
-    }
-    if (config.Rnc) {
-      doc.text(`RNC: ${config.Rnc}`, companyInfoX, companyY);
-    }
-
-    // Document information on the right
-    const documentNumber = formatDocumentNumber(orden.IdOrden);
-    doc.fontSize(12).font('Helvetica-Bold').text(`Documento: ${documentNumber}`, documentInfoX, headerY);
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`Fecha: ${formatDate(orden.Fecha)}`, documentInfoX, headerY + 20);
-    doc.text(`Fecha de Creación: ${formatDateTime(orden.FechaCreacion || new Date())}`, documentInfoX, headerY + 35);
-    doc.moveDown(2);
-
-    // Client and Vendor information stacked vertically
-    const infoX = 60;
-    let currentY = doc.y;
-
-    // Client information section
-    doc.fontSize(12).font('Helvetica-Bold').text('CLIENTE', infoX, currentY);
-    doc.fontSize(10).font('Helvetica');
-    currentY += 20;
-    doc.text(`Cliente: ${orden.Cliente.NombreC}`, infoX, currentY);
-    currentY += 15;
-    if (orden.Cliente.Rnc) {
-      doc.text(`RNC: ${orden.Cliente.Rnc}`, infoX, currentY);
-      currentY += 15;
-    }
-    if (orden.Cliente.TelefonoC) {
-      doc.text(`Teléfono: ${orden.Cliente.TelefonoC}`, infoX, currentY);
-      currentY += 15;
-    }
-
-    // Add some space between client and vendor sections
-    currentY += 10;
-
-    // Vendor information section (below client)
-    doc.fontSize(12).font('Helvetica-Bold').text('VENDEDOR', infoX, currentY);
-    doc.fontSize(10).font('Helvetica');
-    currentY += 20;
-    doc.text(`Vendedor: ${orden.Vendedor.NombreV}`, infoX, currentY);
-    currentY += 15;
-    if (orden.Vendedor.TelefonoV) {
-      doc.text(`Teléfono: ${orden.Vendedor.TelefonoV}`, infoX, currentY);
-      currentY += 15;
-    }
-
-    // Update document position for next section
-    doc.y = currentY;
-
-    doc.moveDown(2);
-
-    // Items table with better formatting
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('DETALLES DE LA COTIZACIÓN');
-    doc.moveDown(0.5);
-
-    // Table headers with background
-    const tableY = doc.y;
-    const colX = [60, 200, 280, 350, 420, 490];
-    
-    // Header background
-    doc.rect(60, tableY - 5, 495, 25).fill('#f0f0f0');
-    
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
-    doc.text('Producto', colX[0], tableY);
-    doc.text('Cant.', colX[1], tableY);
-    doc.text('Precio', colX[2], tableY);
-    doc.text('Impuesto', colX[3], tableY);
-    doc.text('Subtotal', colX[4], tableY);
-    doc.text('ITBIS', colX[5], tableY);
-
-    // Draw header line
-    doc.moveTo(60, tableY + 20).lineTo(555, tableY + 20).stroke();
-    doc.moveDown(0.5);
-
-    // Items rows with alternating background
-    let tableRowY = doc.y;
-    let totalSubtotal = 0;
-    let totalITBIS = 0;
-    let rowCount = 0;
-
-    orden.items.forEach((item) => {
-      const subtotal = (item.Cantidad || 0) * (item.PrecioV || 0);
-      const itbis = item.Impuesto || 0;
-      const tipoImpuesto = config.TipoImpuesto === 'A' ? 'Aplicado' : 'Incluido';
-      
-      totalSubtotal += subtotal;
-      totalITBIS += itbis;
-
-      // Alternate row background
-      if (rowCount % 2 === 0) {
-        doc.rect(60, tableRowY - 5, 495, 20).fill('#fafafa');
-      }
-
-      // Ensure text color is black for visibility
-      doc.fontSize(9).font('Helvetica').fillColor('black');
-      doc.text(item.producto.NombreP.substring(0, 25), colX[0], tableRowY);
-      doc.text(String(item.Cantidad || 0), colX[1], tableRowY);
-      doc.text(formatCurrency(item.PrecioV || 0), colX[2], tableRowY);
-      doc.text(tipoImpuesto, colX[3], tableRowY);
-      doc.text(formatCurrency(subtotal), colX[4], tableRowY);
-      doc.text(formatCurrency(itbis), colX[5], tableRowY);
-
-      tableRowY += 25;
-      rowCount++;
-    });
-
-    // Draw bottom line
-    doc.moveTo(60, tableRowY + 5).lineTo(555, tableRowY + 5).stroke();
-    doc.moveDown(5); // Much more space between details and totals
-
-    // Totals section with better formatting
-    const totalsY = doc.y;
-    doc.rect(350, totalsY - 10, 205, 80).stroke();
-    
-    // Ensure text color is black for totals
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('black');
-    doc.text('TOTALES', 360, totalsY);
-    doc.fontSize(10).font('Helvetica').fillColor('black');
-    doc.text(`Subtotal: ${formatCurrency(totalSubtotal)}`, 360, totalsY + 20);
-    doc.text(`ITBIS: ${formatCurrency(totalITBIS)}`, 360, totalsY + 35);
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
-    doc.text(`TOTAL: ${formatCurrency(orden.Total || 0)}`, 360, totalsY + 55);
-
-    // Footer with user and print information in gray
-    doc.moveDown(2);
-    doc.fontSize(9).font('Helvetica').fillColor('#666666').text(`Vendedor: ${orden.Vendedor.NombreV} - Fecha de impresión: ${formatDateTime(new Date())}`, { align: 'center' });
-
-    // Finalize PDF
-    doc.end();
-
-  } catch (error) {
-    console.error('Error generating PDF:', error);
-    res.status(500).json({ error: 'Error generando la cotización PDF' });
-  }
-}; 
-
-
-// Paper size configurations
-const PAPER_CONFIGS = {
-  letter: {
-    size: 'LETTER' as const,
-    width: 612,
-    height: 792,
-    margin: 40,
-    contentWidth: 512
-  },
-  thermal: {
-    size: [216, 1000] as [number, number], // 3 inch width (216 points), variable height
-    width: 216,
-    height: 1000,
-    margin: 10,
-    contentWidth: 196
-  }
-};
-
-
 export const generateFacturaPDFWithSize = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { paperSize = 'letter' } = req.query; // Default to letter size
+  const { paperSize = 'thermal' } = req.query; // Default to thermal size
   
   try {
     // Get order with all related data
@@ -778,19 +747,61 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
       }).format(new Date(date));
     };
 
-    // Helper function to truncate text to fit in 2 lines with ellipsis
-    const truncateTextToLines = (text: string, maxWidth: number, fontSize: number, maxLines: number = 2): string => {
-      const avgCharWidth = fontSize * 0.6; // Approximate character width
-      const maxCharsPerLine = Math.floor(maxWidth / avgCharWidth);
-      const maxTotalChars = maxCharsPerLine * maxLines;
+    // Helper function to calculate ITBIS based on product value and tax type
+    const calculateITBIS = (cantidad: number, precioV: number, tipoImpuesto: string): number => {
+      const valorTotal = cantidad * precioV;
+      const ITBIS_RATE = 0.18; // 18% ITBIS rate
       
-      if (text.length <= maxTotalChars) {
-        return text;
+      if (tipoImpuesto === 'I') { // Incluido
+        // ITBIS = valorTotal / (1 + rate) * rate
+        return valorTotal / (1 + ITBIS_RATE) * ITBIS_RATE;
+      } else { // Aplicado
+        // ITBIS = valorTotal * rate
+        return valorTotal * ITBIS_RATE;
+      }
+    };
+
+    // Helper function to split text into two lines based on width
+    const splitTextIntoTwoLines = (text: string, maxWidth: number, fontSize: number): string[] => {
+      const avgCharWidth = fontSize * 0.6;
+      const maxCharsPerLine = Math.floor(maxWidth / avgCharWidth);
+      
+      if (text.length <= maxCharsPerLine) {
+        return [text, ''];
       }
       
-      // Calculate where to cut for ellipsis (leaving space for "...")
-      const cutPoint = maxTotalChars - 3;
-      return text.substring(0, cutPoint) + '...';
+      // Try to find a good break point (space) near the middle
+      const idealBreak = maxCharsPerLine;
+      let breakPoint = idealBreak;
+      
+      // Look for a space before the ideal break point
+      for (let i = idealBreak; i >= Math.floor(idealBreak * 0.7); i--) {
+        if (text[i] === ' ') {
+          breakPoint = i;
+          break;
+        }
+      }
+      
+      // If no good break point found, just cut at max length
+      if (breakPoint === idealBreak && text[idealBreak] !== ' ') {
+        // Check if we're in the middle of a word, if so, try to find a better cut
+        while (breakPoint > Math.floor(idealBreak * 0.7) && text[breakPoint] !== ' ') {
+          breakPoint--;
+        }
+        if (breakPoint <= Math.floor(idealBreak * 0.7)) {
+          breakPoint = idealBreak;
+        }
+      }
+      
+      const firstLine = text.substring(0, breakPoint).trim();
+      let secondLine = text.substring(breakPoint).trim();
+      
+      // Truncate second line if it's too long
+      if (secondLine.length > maxCharsPerLine) {
+        secondLine = secondLine.substring(0, maxCharsPerLine).trim();
+      }
+      
+      return [firstLine, secondLine];
     };
 
     // Generate content based on paper size
@@ -819,13 +830,18 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
         doc.text(`RNC: ${config.Rnc}`, margin, currentY, center);
         currentY += 15;
       }
-
+      if (config.TipoImpuesto) {
+        const nombreTipoImpuesto = config.TipoImpuesto === 'A' ? 'Aplicado' : 'Incluido';
+        doc.text(`Tipo de Impuesto: ${nombreTipoImpuesto}`, margin, currentY, center);
+        currentY += 15;
+      }
+      
       // Document info
       doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
       currentY += 10;
       
       const docNumber = formatDocumentNumber(orden.IdOrden);
-      doc.fontSize(10).font('Helvetica-Bold').text('FACTURA', margin, currentY, center);
+      doc.fontSize(10).font('Helvetica-Bold').text('COTIZACION', margin, currentY, center);
       currentY += 15;
       
       doc.fontSize(8);
@@ -836,84 +852,107 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
       // Client info
       doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
       currentY += 10;
+
+      doc.font('Helvetica-Bold').text('VENDEDOR:', margin, currentY);
+      doc.font('Helvetica').text(orden.Vendedor.NombreV, margin + 50, currentY);
+      currentY += 24;
       
-      doc.font('Helvetica-Bold').text('CLIENTE:', margin, currentY);
-      currentY += 12;
-      doc.font('Helvetica').text(orden.Cliente.NombreC, margin, currentY);
-      currentY += 36;
+      doc.font('Helvetica-Bold').text('CLIENTE:', margin , currentY);
+      doc.font('Helvetica').text(orden.Cliente.NombreC, margin + 40, currentY);
+      currentY += 18;
       
       if (orden.Cliente.Rnc) {
-        doc.text(`RNC: ${orden.Cliente.Rnc}`, margin, currentY);
+        doc.font('Helvetica-Oblique').text(`RNC: ${orden.Cliente.Rnc}`, margin + 40, currentY);
         currentY += 12;
       }
       
-      // Items header
-      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
       currentY += 10;
 
-      // Column positions for thermal
-      const colProduct = margin;
-      const colCant = margin + 65;
-      const colPrecio = margin + 95;
-      const colTotal = margin + 145;
-      const maxProductWidth = 60;
-      
-      // Draw table header
+      // Items header
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 8;
+
+      // Column headers for thermal
       doc.font('Helvetica-Bold').fontSize(8);
-      doc.text('PRODUCTO', colProduct, currentY);
-      doc.text('CANT', colCant, currentY);
-      doc.text('PRECIO', colPrecio, currentY);
-      doc.text('TOTAL', colTotal, currentY);
-      currentY += 15;
+      doc.text('PRODUCTO', margin, currentY);
       
-      // Items
+      // Right align ITBIS and VALOR headers
+      const itbisHeader = 'ITBIS';
+      const valorHeader = 'VALOR';
+      const itbisHeaderX = margin + 135 - doc.widthOfString(itbisHeader);
+      const valorHeaderX = margin + 185 - doc.widthOfString(valorHeader);
+      
+      doc.text(itbisHeader, itbisHeaderX, currentY);
+      doc.text(valorHeader, valorHeaderX, currentY);
+      currentY += 12;
+      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+      currentY += 8;
+      
+      // Items with new format
       let total = 0;
+      let totalITBIS = 0;
+      
       orden.items.forEach(item => {
-        const subtotal = (item.Cantidad || 0) * (item.PrecioV || 0);
-        total += subtotal;
+        const cantidad = item.Cantidad || 0;
+        const precioUnitario = item.PrecioV || 0;
+        const valorTotal = cantidad * precioUnitario;
+        const itbis = calculateITBIS(cantidad, precioUnitario, config.TipoImpuesto || 'A');
+        
+        total += valorTotal;
+        totalITBIS += itbis;
         
         doc.font('Helvetica').fontSize(8);
         
-        // Truncate product name to fit in 2 lines
-        const truncatedProductName = truncateTextToLines(item.producto.NombreP, maxProductWidth, 8);
+        // Product name split into two lines
+        const maxProductWidth = 90;
+        const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 8);
         
-        const beforeY = currentY;
-        doc.text(truncatedProductName, colProduct, currentY, {
-          width: maxProductWidth,
-          lineGap: 1,
-          align: 'left' as const
-        });
+        // First line of product name
+        doc.text(productLines[0], margin, currentY);
         
-        // Calculate actual height used (max 2 lines)
-        const lineHeight = 9; // fontSize + lineGap
-        const lines = Math.ceil(doc.widthOfString(truncatedProductName) / maxProductWidth);
-        const actualLines = Math.min(lines, 2);
-        const productHeight = actualLines * lineHeight;
-
-        // Other columns aligned with first line
-        doc.text(String(item.Cantidad || 0), colCant, beforeY);
-        doc.text(formatCurrency(item.PrecioV || 0).replace('RD$', ''), colPrecio, beforeY);
-        doc.text(formatCurrency(subtotal).replace('RD$', ''), colTotal, beforeY);
-
-        // Advance Y with more spacing between products
-        currentY = beforeY + productHeight + 8; // Increased spacing from 5 to 8
+        // Right align ITBIS and VALOR on first line
+        const itbisText = formatCurrency(itbis).replace('RD$', '');
+        const valorText = formatCurrency(valorTotal).replace('RD$', '');
+        const itbisX = margin + 135 - doc.widthOfString(itbisText);
+        const valorX = margin + 185 - doc.widthOfString(valorText);
+        
+        doc.text(itbisText, itbisX, currentY);
+        doc.text(valorText, valorX, currentY);
+        currentY += 10;
+        
+        // Second line of product name (if exists)
+        if (productLines[1]) {
+          doc.text(productLines[1], margin, currentY);
+          currentY += 10;
+        }
+        
+        // Presentation, quantity and unit price on next line
+        const presentacion = item.producto.PresentacionP || 'Unidad';
+        const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario).replace('RD$', '')}`;
+        doc.fontSize(7).text(detalleLinea, margin, currentY);
+        currentY += 15; // Extra spacing between products
       });
       
-      // Total
-      doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
-      currentY += 10;
-      
-      doc.font('Helvetica-Bold');
-      doc.text('TOTAL:', margin, currentY);
-      doc.text(formatCurrency(total), margin + 130, currentY);
-      currentY += 20;
+       // Totals
+       doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+       currentY += 10;
+       
+       // Helper function to align text to right
+       const rightAlignText = (text: string, y: number) => {
+         const textWidth = doc.widthOfString(text);
+         doc.text(text, margin + contentWidth - textWidth, y);
+       };
+       
+       doc.font('Helvetica-Bold').fontSize(8);
+       rightAlignText(`SUBTOTAL: ${formatCurrency(total - totalITBIS).replace('RD$', '')}`, currentY);
+       currentY += 12;
+       rightAlignText(`ITBIS: ${formatCurrency(totalITBIS).replace('RD$', '')}`, currentY);
+       currentY += 12;
+       rightAlignText(`TOTAL: ${formatCurrency(total).replace('RD$', '')}`, currentY);
+       currentY += 20;
       
       // Footer
       doc.font('Helvetica').fontSize(7);
-      doc.text('Gracias por su compra', margin, currentY, center);
-      currentY += 10;
-      doc.text(`Vendedor: ${orden.Vendedor.NombreV}`, margin, currentY, center);
-      currentY += 10;
       doc.text(`Impreso: ${formatDateTime(new Date())}`, margin, currentY, center);
       
     } else {
@@ -947,6 +986,12 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
       }
       if (config.Rnc) {
         doc.text(`RNC: ${config.Rnc}`, companyInfoX, companyY);
+        companyY += 15;
+      }
+      if (config.TipoImpuesto) {
+        const nombreTipoImpuesto = config.TipoImpuesto === 'A' ? 'Aplicado' : 'Incluido';
+        doc.text(`Tipo de Impuesto: ${nombreTipoImpuesto}`, companyInfoX, companyY);
+        companyY += 15;
       }
 
       // Document information on the right
@@ -989,94 +1034,106 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
       doc.y = currentY;
       doc.moveDown(2);
 
-      // Items table
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('DETALLES DE LA FACTURA');
-      doc.moveDown(0.5);
+      // Items section with table format
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('black').text('DETALLES DE LA COTIZACION');
+      doc.moveDown(1);
 
-      const tableY = doc.y;
-      const colX = [60, 200, 280, 350, 420, 490];
+      // Table headers
+      const headerY2 = doc.y;
+      const colProduct = 70;
+      const colITBIS = 300;
+      const colValor = 420;
       
-      doc.rect(60, tableY - 5, 495, 25).fill('#f0f0f0');
+      doc.rect(60, headerY2 - 5, 495, 25).fill('#f0f0f0');
       
       doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
-      doc.text('Producto', colX[0], tableY);
-      doc.text('Cant.', colX[1], tableY);
-      doc.text('Precio', colX[2], tableY);
-      doc.text('Impuesto', colX[3], tableY);
-      doc.text('Subtotal', colX[4], tableY);
-      doc.text('ITBIS', colX[5], tableY);
+      doc.text('PRODUCTO', colProduct, headerY2);
+      
+      // Right align ITBIS and VALOR headers
+      const itbisHeader = 'ITBIS';
+      const valorHeader = 'VALOR';
+      const itbisHeaderX = colValor - 30 - doc.widthOfString(itbisHeader);
+      const valorHeaderX = colValor + 90 - doc.widthOfString(valorHeader);
+      
+      doc.text(itbisHeader, itbisHeaderX, headerY2);
+      doc.text(valorHeader, valorHeaderX, headerY2);
 
-      doc.moveTo(60, tableY + 20).lineTo(555, tableY + 20).stroke();
-      doc.moveDown(0.5);
+      doc.moveTo(60, headerY2 + 20).lineTo(555, headerY2 + 20).stroke();
+      doc.moveDown(1);
 
-      let tableRowY = doc.y;
+      let itemY = doc.y;
       let totalSubtotal = 0;
       let totalITBIS = 0;
       let rowCount = 0;
 
       orden.items.forEach((item) => {
-        const subtotal = (item.Cantidad || 0) * (item.PrecioV || 0);
-        const itbis = item.Impuesto || 0;
-        const tipoImpuesto = config.TipoImpuesto === 'A' ? 'Aplicado' : 'Incluido';
+        const cantidad = item.Cantidad || 0;
+        const precioUnitario = item.PrecioV || 0;
+        const valorTotal = cantidad * precioUnitario;
+        const itbis = calculateITBIS(cantidad, precioUnitario, config.TipoImpuesto || 'A');
         
-        totalSubtotal += subtotal;
+        totalSubtotal += (valorTotal - itbis);
         totalITBIS += itbis;
 
-        const productColumnWidth = colX[1] - colX[0] - 5; // Width of product column
-        
-        // Truncate product name to fit in 2 lines
-        const truncatedProductName = truncateTextToLines(item.producto.NombreP, productColumnWidth, 9);
+        // Calculate row height (minimum 50px for three lines: 2 product + 1 detail)
+        const rowHeight = 50;
 
-        // Calculate row height needed for alternating background
-        const lineHeight = 10; // fontSize + lineGap
-        const lines = Math.ceil(doc.widthOfString(truncatedProductName) / productColumnWidth);
-        const actualLines = Math.min(lines, 2);
-        const rowHeight = Math.max(20, actualLines * lineHeight + 5); // Minimum 20px height
-
+        // Alternating row background
         if (rowCount % 2 === 0) {
-          doc.rect(60, tableRowY - 5, 495, rowHeight).fill('#fafafa');
+          doc.rect(60, itemY - 5, 495, rowHeight).fill('#fafafa');
         }
 
         doc.fontSize(9).font('Helvetica').fillColor('black');
         
-        const beforeY = tableRowY;
-        doc.text(truncatedProductName, colX[0], tableRowY, {
-          width: productColumnWidth,
-          lineGap: 1,
-          align: 'left' as const
-        });
-
-        // Other columns aligned with first line
-        doc.text(String(item.Cantidad || 0), colX[1], beforeY);
-        doc.text(formatCurrency(item.PrecioV || 0), colX[2], beforeY);
-        doc.text(tipoImpuesto, colX[3], beforeY);
-        doc.text(formatCurrency(subtotal), colX[4], beforeY);
-        doc.text(formatCurrency(itbis), colX[5], beforeY);
-
-        // Advance Y with more spacing between products
-        tableRowY = beforeY + rowHeight + 3; // Increased spacing
+        // Product name split into two lines
+        const maxProductWidth = 220;
+        const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 9);
+        
+        // First line of product name
+        doc.text(productLines[0], colProduct, itemY);
+        
+        // Right align ITBIS and VALOR values on first line
+        const itbisText = formatCurrency(itbis);
+        const valorText = formatCurrency(valorTotal);
+        const itbisX = colValor - 30 - doc.widthOfString(itbisText);
+        const valorX = colValor + 90 - doc.widthOfString(valorText);
+        
+        doc.text(itbisText, itbisX, itemY);
+        doc.text(valorText, valorX, itemY);
+        
+        // Second line of product name (if exists)
+        let productSecondLineY = itemY + 12;
+        if (productLines[1]) {
+          doc.text(productLines[1], colProduct, productSecondLineY);
+          productSecondLineY += 12;
+        }
+        
+        // Presentation, quantity and unit price on next line
+        const presentacion = item.producto.PresentacionP || 'Unidad';
+        const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario)}`;
+        doc.fontSize(8).text(detalleLinea, colProduct, productSecondLineY);
+        
+        itemY += rowHeight + 3; // Move to next row
         rowCount++;
       });
 
-      doc.moveTo(60, tableRowY + 5).lineTo(555, tableRowY + 5).stroke();
-      doc.moveDown(5);
+      // Draw line after items
+      doc.moveTo(60, itemY).lineTo(555, itemY).stroke();
+      doc.moveDown(6);
 
+      // Totals section
       const totalsY = doc.y;
+      doc.text(`FECHA DE IMPRESION: ${formatDateTime(new Date())}`,60, totalsY -10);
       doc.rect(350, totalsY - 10, 205, 80).stroke();
-      
       doc.fontSize(12).font('Helvetica-Bold').fillColor('black');
       doc.text('TOTALES', 360, totalsY);
       doc.fontSize(10).font('Helvetica').fillColor('black');
       doc.text(`Subtotal: ${formatCurrency(totalSubtotal)}`, 360, totalsY + 20);
       doc.text(`ITBIS: ${formatCurrency(totalITBIS)}`, 360, totalsY + 35);
       doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
-      doc.text(`TOTAL: ${formatCurrency(orden.Total || 0)}`, 360, totalsY + 55);
+      doc.text(`TOTAL: ${formatCurrency(orden.Total || (totalSubtotal + totalITBIS))}`, 360, totalsY + 50);
+      doc.fontSize(10).font('Helvetica').fillColor('black');
 
-      doc.moveDown(2);
-      doc.fontSize(9).font('Helvetica').fillColor('#666666').text(
-        `Vendedor: ${orden.Vendedor.NombreV} - Fecha de impresión: ${formatDateTime(new Date())}`, 
-        { align: 'center' }
-      );
     }
 
     // Finalize PDF
@@ -1084,6 +1141,6 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
 
   } catch (error) {
     console.error('Error generating PDF:', error);
-    res.status(500).json({ error: 'Error generando la factura PDF' });
+    res.status(500).json({ error: 'Error generando la cotizacion PDF' });
   }
 };
