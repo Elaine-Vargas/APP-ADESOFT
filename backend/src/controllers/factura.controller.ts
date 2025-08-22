@@ -293,13 +293,18 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       doc.text(`Doc: ${docNumber}`, margin, currentY);
       doc.text(`Fecha: ${formatDateShort(transaccion.Fecha)}`, margin + 100, currentY);
       currentY += 12;
-      
+      // Show Document VE if exists
+      if (referencias && referencias.length > 0 && referencias[0].DocumentoVE) {
+        doc.font('Helvetica-Bold').text('Doc. Venta:', margin, currentY);
+        doc.font('Helvetica').text(referencias[0].DocumentoVE, margin + 55, currentY);
+        currentY += 18;
+      }
       // Client info
       doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
       currentY += 10;
 
       const clientName = cliente?.NombreC || 'N/A';
-      const clientLines = splitTextIntoTwoLines(clientName, 140, 8);
+      const clientLines = splitTextIntoTwoLines(clientName, 200, 8);
       const clientText = 'CLIENTE: ' + clientLines[0];
       const clientTextWidth = doc.widthOfString(clientText);
       doc.font('Helvetica-Bold').text(clientText, margin, currentY + 12, { width: clientTextWidth });
@@ -307,25 +312,20 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
         currentY += 12;
         doc.text(clientLines[1], margin, currentY + 12);
       }
-      currentY += 12;
+      currentY += 24;
      
       // VENDOR information
       const vendorName = vendedor?.NombreV || 'N/A';
-      const vendorLines = splitTextIntoTwoLines(vendorName, 140, 8);
+      const vendorLines = splitTextIntoTwoLines(vendorName, 200, 8);
       const vendorText = 'VENDEDOR: ' + vendorLines[0];
       const vendorTextWidth = doc.widthOfString(vendorText);
       doc.font('Helvetica-Bold').text(vendorText, margin, currentY + 12, { width: vendorTextWidth });
       if (vendorLines[1]) {
         currentY += 12;
         doc.text(vendorLines[1], margin, currentY + 12);
-      }
-      currentY += 12;
-      // Show Document VE if exists
-      if (referencias && referencias.length > 0 && referencias[0].DocumentoVE) {
-        doc.font('Helvetica-Bold').text('Doc. Venta:', margin, currentY);
-        doc.font('Helvetica').text(referencias[0].DocumentoVE, margin + 55, currentY);
-        currentY += 18;
-      }
+      }      currentY += 12;
+
+
 
       // Payment methods section
       currentY += 10;
@@ -548,7 +548,6 @@ export const generateFacturaTransaccionIN = async (req: Request, res: Response) 
       
       if (referencias && referencias.length > 0) {
         // Section header
-        doc.rect(50, refY, 500, 25).fill('#f0f0f0');
         doc.fontSize(12).font('Helvetica-Bold').fillColor('#333333')
            .text('Gracias por su Pago', 60, refY + 5);
         
