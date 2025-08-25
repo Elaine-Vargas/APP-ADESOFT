@@ -13,7 +13,7 @@ export const getFacturaData = async (req: Request, res: Response) => {
       where: { IdOrden: parseInt(id) },
       include: { 
         items: { 
-          include: { producto: true } 
+          include: { Producto: true } 
         }, 
         Cliente: true, 
         Vendedor: true 
@@ -670,7 +670,7 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
       where: { IdOrden: parseInt(id) },
       include: { 
         items: { 
-          include: { producto: true } 
+          include: { Producto: true } 
         }, 
         Cliente: true, 
         Vendedor: true 
@@ -904,7 +904,7 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
         
         // Product name split into two lines
         const maxProductWidth = 90;
-        const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 8);
+        const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 8);
         
         // First line of product name
         doc.text(productLines[0], margin, currentY);
@@ -926,7 +926,7 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
         }
         
         // Presentation, quantity and unit price on next line
-        const presentacion = item.producto.PresentacionP || 'Unidad';
+        const presentacion = item.Producto.PresentacionP || 'Unidad';
         const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario).replace('RD$', '')}`;
         doc.fontSize(7).text(detalleLinea, margin, currentY);
         currentY += 15; // Extra spacing between products
@@ -1086,7 +1086,7 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
         
         // Product name split into two lines
         const maxProductWidth = 220;
-        const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 9);
+        const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 9);
         
         // First line of product name
         doc.text(productLines[0], colProduct, itemY);
@@ -1108,7 +1108,7 @@ export const generateFacturaPDFWithSize = async (req: Request, res: Response) =>
         }
         
         // Presentation, quantity and unit price on next line
-        const presentacion = item.producto.PresentacionP || 'Unidad';
+        const presentacion = item.Producto.PresentacionP || 'Unidad';
         const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario)}`;
         doc.fontSize(8).text(detalleLinea, colProduct, productSecondLineY);
         

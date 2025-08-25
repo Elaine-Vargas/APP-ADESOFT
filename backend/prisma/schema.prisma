@@ -19,34 +19,38 @@ model Producto {
   ExistenciaP   Float?      @default(0) @db.Float
   GrupoP        String      @db.VarChar(50)
   FechaSinc     DateTime?   @db.Timestamp(0)
-  ordenItems    OrdenItem[]
+  OrdenItem     OrdenItem[]
 }
 
 model Vendedor {
-  IdVendedor String    @id @db.VarChar(6)
-  CedulaV    String?   @db.Char(13)
-  NombreV    String    @db.VarChar(50)
-  TelefonoV  String?   @db.Char(50)
-  IdRuta     String?   @db.VarChar(6)
-  FechaSinc  DateTime? @db.Timestamp(0)
-  Orden      Orden[]
+  IdVendedor     String           @id @db.VarChar(6)
+  CedulaV        String?          @db.Char(13)
+  NombreV        String           @db.VarChar(50)
+  TelefonoV      String?          @db.Char(50)
+  IdRuta         String?          @db.VarChar(6)
+  FechaSinc      DateTime?        @db.Timestamp(0)
+  Orden          Orden[]
+  ReferenciaPago ReferenciaPago[]
+  Transaccion    Transaccion[]
 }
 
 model Cliente {
-  IdCliente     String    @id @db.VarChar(10)
-  NombreC       String    @db.VarChar(60)
-  Rnc           String?   @db.VarChar(15)
-  TelefonoC     String?   @db.VarChar(50)
-  DireccionC1   String?   @db.VarChar(60)
-  DireccionC2   String?   @db.VarChar(60)
-  ClienteExento Boolean?  @default(false)
-  BalanceC      Float?    @db.Float
-  IdVendedor    String?   @db.VarChar(6)
-  Ciudad        String?   @db.VarChar(50)
-  Idzona        String?   @db.VarChar(6)
-  Idruta        String?   @db.VarChar(6)
-  FechaSinc     DateTime? @db.Timestamp(0)
-  Orden         Orden[]
+  IdCliente      String           @id @db.VarChar(10)
+  NombreC        String           @db.VarChar(60)
+  Rnc            String?          @db.VarChar(15)
+  TelefonoC      String?          @db.VarChar(50)
+  DireccionC1    String?          @db.VarChar(60)
+  DireccionC2    String?          @db.VarChar(60)
+  ClienteExento  Boolean?         @default(false)
+  BalanceC       Float?           @db.Float
+  IdVendedor     String?          @db.VarChar(6)
+  Ciudad         String?          @db.VarChar(50)
+  Idzona         String?          @db.VarChar(6)
+  Idruta         String?          @db.VarChar(6)
+  FechaSinc      DateTime?        @db.Timestamp(0)
+  Orden          Orden[]
+  ReferenciaPago ReferenciaPago[]
+  Transaccion    Transaccion[]
 }
 
 model Orden {
@@ -61,8 +65,8 @@ model Orden {
   Estado        Estado?     @default(A)
   FechaCreacion DateTime?   @default(now()) @db.Timestamp(0)
   FechaSinc     DateTime?   @db.Timestamp(0)
-  Vendedor      Vendedor    @relation(fields: [IdVendedor], references: [IdVendedor], onDelete: NoAction, onUpdate: NoAction, map: "Orden_ibfk_1")
-  Cliente       Cliente     @relation(fields: [IdCliente], references: [IdCliente], onDelete: NoAction, onUpdate: NoAction, map: "Orden_ibfk_2")
+  Cliente       Cliente     @relation(fields: [IdCliente], references: [IdCliente], onDelete: NoAction, onUpdate: NoAction, map: "Orden_ibfk_1")
+  Vendedor      Vendedor    @relation(fields: [IdVendedor], references: [IdVendedor], onDelete: NoAction, onUpdate: NoAction, map: "Orden_ibfk_2")
   items         OrdenItem[]
 
   @@index([IdCliente], map: "IdCliente")
@@ -76,11 +80,11 @@ model OrdenItem {
   Cantidad   Float?   @default(0) @db.Float
   PrecioV    Float?   @default(0) @db.Float
   Impuesto   Float?   @default(0) @db.Float
-  orden      Orden    @relation(fields: [IdOrden], references: [IdOrden], onDelete: NoAction, onUpdate: NoAction, map: "OrdenItem_ibfk_1")
-  producto   Producto @relation(fields: [IdProducto], references: [IdProducto], onDelete: NoAction, onUpdate: NoAction, map: "OrdenItem_ibfk_2")
+  orden      Orden    @relation(fields: [IdOrden], references: [IdOrden], onDelete: Cascade, onUpdate: NoAction, map: "OrdenItem_ibfk_1")
+  Producto   Producto @relation(fields: [IdProducto], references: [IdProducto], onDelete: NoAction, onUpdate: NoAction, map: "OrdenItem_ibfk_2")
 
   @@id([IdOrden, IdProducto])
-  @@index([IdProducto], map: "IdProducto")
+  @@index([IdProducto], map: "OrdenItem_ibfk_2")
 }
 
 model Config {
@@ -116,6 +120,8 @@ model Transaccion {
   SECNCF         String?          @db.VarChar(20)
   FechaSinc      DateTime?        @db.Timestamp(0)
   ReferenciaPago ReferenciaPago[]
+  Vendedor       Vendedor         @relation(fields: [IdVendedor], references: [IdVendedor], onDelete: NoAction, onUpdate: NoAction, map: "Transaccion_ibfk_1")
+  Cliente        Cliente          @relation(fields: [IdCliente], references: [IdCliente], onDelete: NoAction, onUpdate: NoAction, map: "Transaccion_ibfk_2")
 
   @@index([IdCliente], map: "IdCliente")
   @@index([IdVendedor], map: "IdVendedor")
@@ -131,8 +137,12 @@ model ReferenciaPago {
   ValorPago    Float       @db.Float
   CreatedAt    DateTime?   @default(now()) @db.Timestamp(0)
   Transaccion  Transaccion @relation(fields: [IdTransa], references: [IdTransa], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_1")
+  Cliente      Cliente?    @relation(fields: [IdCliente], references: [IdCliente], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_2")
+  Vendedor     Vendedor?   @relation(fields: [IdVendedor], references: [IdVendedor], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_3")
 
   @@index([IdTransa], map: "IdTransa")
+  @@index([IdCliente], map: "IdCliente")
+  @@index([IdVendedor], map: "IdVendedor")
 }
 
 model Rutas {

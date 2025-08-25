@@ -5,7 +5,7 @@ import { Request, Response } from 'express';
 // Get all orden items
 export const getAllOrdenItems = async (req: Request, res: Response) => {
   try {
-    const items = await prisma.ordenItem.findMany({ include: { producto: true, orden: true } });
+    const items = await prisma.ordenItem.findMany({ include: { Producto: true, orden: true } });
     res.json(items);
   } catch (error) {
     console.error(error);
@@ -19,7 +19,7 @@ export const getOrdenItemById = async (req: Request, res: Response) => {
   try {
     const item = await prisma.ordenItem.findUnique({
       where: { IdOrden_IdProducto: { IdOrden: parseInt(IdOrden), IdProducto: parseInt(IdProducto) } },
-      include: { producto: true, orden: true }
+      include: { Producto: true, orden: true }
     });
     if (!item) {
       return res.status(404).json({ message: 'OrdenItem no encontrado' });
@@ -57,7 +57,7 @@ export const searchOrdenItems = async (req: Request, res: Response) => {
       if (maxPrecioV) where.PrecioV.lte = parseFloat(maxPrecioV as string);
     }
 
-    const items = await prisma.ordenItem.findMany({ where, include: { producto: true, orden: true } });
+    const items = await prisma.ordenItem.findMany({ where, include: { Producto: true, orden: true } });
     res.json(items);
   } catch (error) {
     console.error(error);

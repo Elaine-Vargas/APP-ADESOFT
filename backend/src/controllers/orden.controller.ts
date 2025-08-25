@@ -15,7 +15,7 @@ export const getAllOrdenes = async (req: Request, res: Response) => {
       where,
       include: { 
         items: { 
-          include: { producto: true } 
+          include: { Producto: true } 
         }, 
         Cliente: true, 
         Vendedor: true 
@@ -39,7 +39,7 @@ export const getOrdenById = async (req: Request, res: Response) => {
       where: { IdOrden: parseInt(id) },
       include: { 
         items: { 
-          include: { producto: true } 
+          include: { Producto: true } 
         }, 
         Cliente: true, 
         Vendedor: true 
@@ -84,7 +84,7 @@ export const searchOrdenes = async (req: Request, res: Response) => {
       where, 
       include: { 
         items: { 
-          include: { producto: true } 
+          include: { Producto: true } 
         }, 
         Cliente: true, 
         Vendedor: true 
@@ -145,7 +145,7 @@ export const createOrdenWithItems = async (req: Request, res: Response) => {
         where: { IdOrden: newOrden.IdOrden },
         include: { 
           items: { 
-            include: { producto: true } 
+            include: { Producto: true } 
           }, 
           Cliente: true, 
           Vendedor: true 
@@ -239,7 +239,7 @@ export const updateOrdenWithItems = async (req: Request, res: Response) => {
       const completeOrden = await tx.orden.findUnique({
         where: { IdOrden: parseInt(id) },
         include: {
-          items: { include: { producto: true } },
+          items: { include: { Producto: true } },
           Cliente: true,
           Vendedor: true,
         },
