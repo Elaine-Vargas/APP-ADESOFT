@@ -15,7 +15,7 @@ const getFacturaData = async (req, res) => {
             where: { IdOrden: parseInt(id) },
             include: {
                 items: {
-                    include: { producto: true }
+                    include: { Producto: true }
                 },
                 Cliente: true,
                 Vendedor: true
@@ -579,7 +579,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             where: { IdOrden: parseInt(id) },
             include: {
                 items: {
-                    include: { producto: true }
+                    include: { Producto: true }
                 },
                 Cliente: true,
                 Vendedor: true
@@ -773,7 +773,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 doc.font('Helvetica').fontSize(8);
                 // Product name split into two lines
                 const maxProductWidth = 90;
-                const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 8);
+                const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 8);
                 // First line of product name
                 doc.text(productLines[0], margin, currentY);
                 // Right align ITBIS and VALOR on first line
@@ -790,7 +790,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                     currentY += 10;
                 }
                 // Presentation, quantity and unit price on next line
-                const presentacion = item.producto.PresentacionP || 'Unidad';
+                const presentacion = item.Producto.PresentacionP || 'Unidad';
                 const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario).replace('RD$', '')}`;
                 doc.fontSize(7).text(detalleLinea, margin, currentY);
                 currentY += 15; // Extra spacing between products
@@ -924,7 +924,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 doc.fontSize(9).font('Helvetica').fillColor('black');
                 // Product name split into two lines
                 const maxProductWidth = 220;
-                const productLines = splitTextIntoTwoLines(item.producto.NombreP, maxProductWidth, 9);
+                const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 9);
                 // First line of product name
                 doc.text(productLines[0], colProduct, itemY);
                 // Right align ITBIS and VALOR values on first line
@@ -941,7 +941,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                     productSecondLineY += 12;
                 }
                 // Presentation, quantity and unit price on next line
-                const presentacion = item.producto.PresentacionP || 'Unidad';
+                const presentacion = item.Producto.PresentacionP || 'Unidad';
                 const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario)}`;
                 doc.fontSize(8).text(detalleLinea, colProduct, productSecondLineY);
                 itemY += rowHeight + 3; // Move to next row

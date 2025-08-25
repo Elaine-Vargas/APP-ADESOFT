@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateOrdenWithItems = exports.updateOrden = exports.createOrdenWithItems = exports.createOrden = exports.searchOrdenes = exports.getOrdenById = exports.getAllOrdenes = void 0;
+exports.cleanOrphanedOrderItems = exports.updateOrdenWithItems = exports.updateOrden = exports.createOrdenWithItems = exports.createOrden = exports.searchOrdenes = exports.getOrdenById = exports.getAllOrdenes = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
 // Get all ordenes with optional filtering
 const getAllOrdenes = async (req, res) => {
@@ -14,24 +14,91 @@ const getAllOrdenes = async (req, res) => {
             where.IdVendedor = IdVendedor;
         if (Estado)
             where.Estado = Estado;
-        const ordenes = await prisma_1.default.orden.findMany({
-            where,
-            include: {
-                items: {
-                    include: { producto: true }
+        // Intentar primero la consulta completa
+        try {
+            const ordenes = await prisma_1.default.orden.findMany({
+                where,
+                include: {
+                    items: {
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    },
+                    Cliente: true,
+                    Vendedor: true
                 },
-                Cliente: true,
-                Vendedor: true
-            },
-            orderBy: {
-                FechaCreacion: 'desc'
+                orderBy: {
+                    FechaCreacion: 'desc'
+                }
+            });
+            // Filtrar items que puedan tener producto null
+            const validOrdenes = ordenes.map(orden => ({
+                ...orden,
+                items: orden.items.filter(item => item.Producto !== null)
+            }));
+            res.json(validOrdenes);
+        }
+        catch (prismaError) {
+            // Si hay error de datos inconsistentes, usar consulta alternativa
+            if (prismaError.message?.includes('Field Producto is required to return data')) {
+                console.warn('Detected orphaned order items, using alternative query method');
+                const ordenes = await prisma_1.default.orden.findMany({
+                    where,
+                    include: {
+                        Cliente: true,
+                        Vendedor: true
+                    },
+                    orderBy: {
+                        FechaCreacion: 'desc'
+                    }
+                });
+                // Obtener items válidos por separado
+                const ordenesWithItems = await Promise.all(ordenes.map(async (orden) => {
+                    // Obtener IDs de productos válidos
+                    const validProductIds = await prisma_1.default.producto.findMany({
+                        select: { IdProducto: true }
+                    }).then(products => products.map(p => p.IdProducto));
+                    const items = await prisma_1.default.ordenItem.findMany({
+                        where: {
+                            IdOrden: orden.IdOrden,
+                            IdProducto: { in: validProductIds }
+                        },
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    });
+                    return { ...orden, items };
+                }));
+                res.json(ordenesWithItems);
             }
-        });
-        res.json(ordenes);
+            else {
+                throw prismaError;
+            }
+        }
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in getAllOrdenes:', error);
+        res.status(500).json({ error: 'Server error', details: error });
     }
 };
 exports.getAllOrdenes = getAllOrdenes;
@@ -39,24 +106,81 @@ exports.getAllOrdenes = getAllOrdenes;
 const getOrdenById = async (req, res) => {
     const { id } = req.params;
     try {
-        const orden = await prisma_1.default.orden.findUnique({
-            where: { IdOrden: parseInt(id) },
-            include: {
-                items: {
-                    include: { producto: true }
-                },
-                Cliente: true,
-                Vendedor: true
+        try {
+            const orden = await prisma_1.default.orden.findUnique({
+                where: { IdOrden: parseInt(id) },
+                include: {
+                    items: {
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    },
+                    Cliente: true,
+                    Vendedor: true
+                }
+            });
+            if (!orden) {
+                return res.status(404).json({ message: 'Orden no encontrada' });
             }
-        });
-        if (!orden) {
-            return res.status(404).json({ message: 'Orden no encontrada' });
+            // Filtrar items válidos
+            const validOrden = {
+                ...orden,
+                items: orden.items.filter(item => item.Producto !== null)
+            };
+            res.json(validOrden);
         }
-        res.json(orden);
+        catch (prismaError) {
+            if (prismaError.message?.includes('Field Producto is required to return data')) {
+                // Consulta alternativa
+                const orden = await prisma_1.default.orden.findUnique({
+                    where: { IdOrden: parseInt(id) },
+                    include: { Cliente: true, Vendedor: true }
+                });
+                if (!orden) {
+                    return res.status(404).json({ message: 'Orden no encontrada' });
+                }
+                const validProductIds = await prisma_1.default.producto.findMany({
+                    select: { IdProducto: true }
+                }).then(products => products.map(p => p.IdProducto));
+                const items = await prisma_1.default.ordenItem.findMany({
+                    where: {
+                        IdOrden: parseInt(id),
+                        IdProducto: { in: validProductIds }
+                    },
+                    include: {
+                        Producto: {
+                            select: {
+                                IdProducto: true,
+                                CodigoP: true,
+                                NombreP: true,
+                                PrecioP: true,
+                                ImpuestoP: true,
+                                ExistenciaP: true,
+                                GrupoP: true
+                            }
+                        }
+                    }
+                });
+                res.json({ ...orden, items });
+            }
+            else {
+                throw prismaError;
+            }
+        }
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in getOrdenById:', error);
+        res.status(500).json({ error: 'Server error', details: error });
     }
 };
 exports.getOrdenById = getOrdenById;
@@ -82,21 +206,77 @@ const searchOrdenes = async (req, res) => {
             if (maxTotal)
                 where.Total.lte = parseFloat(maxTotal);
         }
-        const ordenes = await prisma_1.default.orden.findMany({
-            where,
-            include: {
-                items: {
-                    include: { producto: true }
-                },
-                Cliente: true,
-                Vendedor: true
+        try {
+            const ordenes = await prisma_1.default.orden.findMany({
+                where,
+                include: {
+                    items: {
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    },
+                    Cliente: true,
+                    Vendedor: true
+                }
+            });
+            // Filtrar items válidos
+            const validOrdenes = ordenes.map(orden => ({
+                ...orden,
+                items: orden.items.filter(item => item.Producto !== null)
+            }));
+            res.json(validOrdenes);
+        }
+        catch (prismaError) {
+            if (prismaError.message?.includes('Field Producto is required to return data')) {
+                const ordenes = await prisma_1.default.orden.findMany({
+                    where,
+                    include: { Cliente: true, Vendedor: true }
+                });
+                const ordenesWithItems = await Promise.all(ordenes.map(async (orden) => {
+                    const validProductIds = await prisma_1.default.producto.findMany({
+                        select: { IdProducto: true }
+                    }).then(products => products.map(p => p.IdProducto));
+                    const items = await prisma_1.default.ordenItem.findMany({
+                        where: {
+                            IdOrden: orden.IdOrden,
+                            IdProducto: { in: validProductIds }
+                        },
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    });
+                    return { ...orden, items };
+                }));
+                res.json(ordenesWithItems);
             }
-        });
-        res.json(ordenes);
+            else {
+                throw prismaError;
+            }
+        }
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in searchOrdenes:', error);
+        res.status(500).json({ error: 'Server error', details: error });
     }
 };
 exports.searchOrdenes = searchOrdenes;
@@ -108,8 +288,8 @@ const createOrden = async (req, res) => {
         res.status(201).json(newOrden);
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in createOrden:', error);
+        res.status(500).json({ error: 'Server error', details: error });
     }
 };
 exports.createOrden = createOrden;
@@ -117,14 +297,34 @@ exports.createOrden = createOrden;
 const createOrdenWithItems = async (req, res) => {
     const { ordenData, items } = req.body;
     try {
+        // Validar que todos los productos existen antes de crear la orden
+        const productIds = items.map((item) => item.IdProducto);
+        const existingProducts = await prisma_1.default.producto.findMany({
+            where: {
+                IdProducto: {
+                    in: productIds
+                }
+            },
+            select: {
+                IdProducto: true
+            }
+        });
+        const existingProductIds = existingProducts.map(p => p.IdProducto);
+        const missingProducts = productIds.filter((id) => !existingProductIds.includes(id));
+        if (missingProducts.length > 0) {
+            return res.status(400).json({
+                error: 'Productos no encontrados',
+                missingProductIds: missingProducts
+            });
+        }
         const result = await prisma_1.default.$transaction(async (tx) => {
             // Create the order
-            const now = new Date(); // Usar la misma fecha actual para ambos campos
+            const now = new Date();
             const newOrden = await tx.orden.create({
                 data: {
                     ...ordenData,
-                    Fecha: now, // Usar fecha actual del sistema
-                    FechaCreacion: now, // Usar fecha actual del sistema
+                    Fecha: now,
+                    FechaCreacion: now,
                 }
             });
             // Create all order items
@@ -142,7 +342,19 @@ const createOrdenWithItems = async (req, res) => {
                 where: { IdOrden: newOrden.IdOrden },
                 include: {
                     items: {
-                        include: { producto: true }
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
                     },
                     Cliente: true,
                     Vendedor: true
@@ -173,8 +385,8 @@ const updateOrden = async (req, res) => {
         res.json(updated);
     }
     catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in updateOrden:', error);
+        res.status(500).json({ error: 'Server error', details: error });
     }
 };
 exports.updateOrden = updateOrden;
@@ -183,6 +395,26 @@ const updateOrdenWithItems = async (req, res) => {
     const { id } = req.params;
     const { ordenData, items } = req.body;
     try {
+        // Validar que todos los productos existen antes de actualizar
+        const productIds = items.map((item) => item.IdProducto);
+        const existingProducts = await prisma_1.default.producto.findMany({
+            where: {
+                IdProducto: {
+                    in: productIds
+                }
+            },
+            select: {
+                IdProducto: true
+            }
+        });
+        const existingProductIds = existingProducts.map(p => p.IdProducto);
+        const missingProducts = productIds.filter((id) => !existingProductIds.includes(id));
+        if (missingProducts.length > 0) {
+            return res.status(400).json({
+                error: 'Productos no encontrados',
+                missingProductIds: missingProducts
+            });
+        }
         const result = await prisma_1.default.$transaction(async (tx) => {
             // Update the main order
             const updatedOrden = await tx.orden.update({
@@ -229,22 +461,75 @@ const updateOrdenWithItems = async (req, res) => {
                 }
             }
             // Fetch the complete updated order with relations
-            const completeOrden = await tx.orden.findUnique({
-                where: { IdOrden: parseInt(id) },
-                include: {
-                    items: { include: { producto: true } },
-                    Cliente: true,
-                    Vendedor: true,
-                },
-            });
-            if (!completeOrden) {
-                throw new Error('No se encontró la orden actualizada');
+            try {
+                const completeOrden = await tx.orden.findUnique({
+                    where: { IdOrden: parseInt(id) },
+                    include: {
+                        items: {
+                            include: {
+                                Producto: {
+                                    select: {
+                                        IdProducto: true,
+                                        CodigoP: true,
+                                        NombreP: true,
+                                        PrecioP: true,
+                                        ImpuestoP: true,
+                                        ExistenciaP: true,
+                                        GrupoP: true
+                                    }
+                                }
+                            }
+                        },
+                        Cliente: true,
+                        Vendedor: true
+                    }
+                });
+                if (!completeOrden) {
+                    throw new Error('No se encontró la orden actualizada');
+                }
+                return {
+                    ...completeOrden,
+                    items: completeOrden.items.filter(item => item.Producto !== null)
+                };
             }
-            // Validación extra: asegurar que hay items
-            if (!completeOrden.items || completeOrden.items.length === 0) {
-                console.warn('La orden no tiene items después de la actualización');
+            catch (prismaError) {
+                if (prismaError.message?.includes('Field Producto is required to return data')) {
+                    // Consulta alternativa si hay items huérfanos
+                    const orden = await tx.orden.findUnique({
+                        where: { IdOrden: parseInt(id) },
+                        include: { Cliente: true, Vendedor: true }
+                    });
+                    if (!orden) {
+                        throw new Error('No se encontró la orden actualizada');
+                    }
+                    const validProductIds = await tx.producto.findMany({
+                        select: { IdProducto: true }
+                    }).then(products => products.map(p => p.IdProducto));
+                    const validItems = await tx.ordenItem.findMany({
+                        where: {
+                            IdOrden: parseInt(id),
+                            IdProducto: { in: validProductIds }
+                        },
+                        include: {
+                            Producto: {
+                                select: {
+                                    IdProducto: true,
+                                    CodigoP: true,
+                                    NombreP: true,
+                                    PrecioP: true,
+                                    ImpuestoP: true,
+                                    ExistenciaP: true,
+                                    GrupoP: true
+                                }
+                            }
+                        }
+                    });
+                    return { ...orden, items: validItems };
+                }
+                else {
+                    throw prismaError;
+                }
             }
-            return completeOrden;
         });
         res.json(result);
     }
@@ -254,7 +539,48 @@ const updateOrdenWithItems = async (req, res) => {
     }
 };
 exports.updateOrdenWithItems = updateOrdenWithItems;
-// Delete orden
+// Función auxiliar para limpiar datos huérfanos (opcional)
+const cleanOrphanedOrderItems = async (req, res) => {
+    try {
+        // Obtener todos los IDs de productos válidos
+        const validProductIds = await prisma_1.default.producto.findMany({
+            select: { IdProducto: true }
+        }).then(products => products.map(p => p.IdProducto));
+        // Encontrar items huérfanos
+        const orphanedItems = await prisma_1.default.ordenItem.findMany({
+            where: {
+                IdProducto: {
+                    notIn: validProductIds
+                }
+            }
+        });
+        if (orphanedItems.length === 0) {
+            return res.json({ message: 'No se encontraron items huérfanos', count: 0 });
+        }
+        // Eliminar items huérfanos
+        const deleteResult = await prisma_1.default.ordenItem.deleteMany({
+            where: {
+                IdProducto: {
+                    notIn: validProductIds
+                }
+            }
+        });
+        res.json({
+            message: 'Items huérfanos eliminados',
+            count: deleteResult.count,
+            orphanedItems: orphanedItems.map(item => ({
+                IdOrden: item.IdOrden,
+                IdProducto: item.IdProducto
+            }))
+        });
+    }
+    catch (error) {
+        console.error('Error cleaning orphaned items:', error);
+        res.status(500).json({ error: 'Server error', details: error });
+    }
+};
+exports.cleanOrphanedOrderItems = cleanOrphanedOrderItems;
+// Delete orden (comentado en el original)
 // export const deleteOrden = async (req: Request, res: Response) => {
 //   const { id } = req.params;
 //   try {
