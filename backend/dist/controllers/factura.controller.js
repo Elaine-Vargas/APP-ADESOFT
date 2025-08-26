@@ -244,7 +244,7 @@ const generateFacturaTransaccionIN = async (req, res) => {
             doc.fontSize(10).font('Helvetica-Bold').text(config.Compania, margin, currentY, center);
             currentY += 15;
             // Address and company info
-            doc.fontSize(8);
+            doc.fontSize(9);
             if (config.Direccion1) {
                 doc.text(config.Direccion1, margin, currentY, center);
                 currentY += 10;
@@ -263,7 +263,7 @@ const generateFacturaTransaccionIN = async (req, res) => {
             const docNumber = transaccion.Documento || transaccion.IdTransa.toString().padStart(8, '0');
             doc.fontSize(10).font('Helvetica-Bold').text('RECIBO DE PAGO', margin, currentY, center);
             currentY += 15;
-            doc.fontSize(8);
+            doc.fontSize(9);
             doc.text(`Doc: ${docNumber}`, margin, currentY);
             doc.text(`Fecha: ${formatDateShort(transaccion.Fecha)}`, margin + 100, currentY);
             currentY += 12;
@@ -301,7 +301,7 @@ const generateFacturaTransaccionIN = async (req, res) => {
             currentY += 10;
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 8;
-            doc.font('Helvetica-Bold').fontSize(8);
+            doc.font('Helvetica-Bold').fontSize(9);
             doc.text('METODO PAGO', margin, currentY);
             const montoText = 'MONTO';
             const montoX = margin + contentWidth - doc.widthOfString(montoText);
@@ -316,7 +316,7 @@ const generateFacturaTransaccionIN = async (req, res) => {
                 { name: 'Cheque', value: transaccion.Cheque || 0 },
                 { name: 'Transferencia', value: transaccion.Transferencia || 0 }
             ].filter(method => method.value > 0);
-            doc.font('Helvetica').fontSize(8);
+            doc.font('Helvetica').fontSize(9);
             paymentMethods.forEach((method) => {
                 doc.text(method.name, margin, currentY);
                 const amountText = formatCurrency(method.value).replace('RD$', '').trim();
@@ -337,11 +337,11 @@ const generateFacturaTransaccionIN = async (req, res) => {
             if (referencias && referencias.length > 0) {
                 doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
                 currentY += 10;
-                doc.font('Helvetica-Bold').fontSize(8);
+                doc.font('Helvetica-Bold').fontSize(9);
                 doc.text('REFERENCIAS DE PAGO:', margin, currentY, center);
                 currentY += 15;
                 referencias.forEach((ref, idx) => {
-                    doc.font('Helvetica').fontSize(7);
+                    doc.font('Helvetica').fontSize(9);
                     if (ref.DocumentoIN) {
                         doc.text(`Doc: ${ref.DocumentoIN}`, margin, currentY);
                         currentY += 10;
@@ -702,7 +702,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.fontSize(10).font('Helvetica-Bold').text(config.Compania, margin, currentY, center);
             currentY += 15;
             // Address
-            doc.fontSize(8);
+            doc.fontSize(9);
             if (config.Direccion1) {
                 doc.text(config.Direccion1, margin, currentY, center);
                 currentY += 10;
@@ -726,7 +726,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             const docNumber = formatDocumentNumber(orden.IdOrden);
             doc.fontSize(10).font('Helvetica-Bold').text('COTIZACION', margin, currentY, center);
             currentY += 15;
-            doc.fontSize(8);
+            doc.fontSize(9);
             doc.text(`Doc: ${docNumber}`, margin, currentY);
             doc.text(`Fecha: ${formatDateShort(orden.Fecha)}`, margin + 100, currentY);
             currentY += 12;
@@ -734,10 +734,10 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 10;
             doc.font('Helvetica-Bold').text('VENDEDOR:', margin, currentY);
-            doc.font('Helvetica').text(orden.Vendedor.NombreV, margin + 50, currentY);
+            doc.font('Helvetica').text(orden.Vendedor.NombreV, margin + 57, currentY);
             currentY += 24;
             doc.font('Helvetica-Bold').text('CLIENTE:', margin, currentY);
-            doc.font('Helvetica').text(orden.Cliente.NombreC, margin + 40, currentY);
+            doc.font('Helvetica').text(orden.Cliente.NombreC, margin + 45, currentY);
             currentY += 18;
             if (orden.Cliente.Rnc) {
                 doc.font('Helvetica-Oblique').text(`RNC: ${orden.Cliente.Rnc}`, margin + 40, currentY);
@@ -770,10 +770,10 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 const itbis = calculateITBIS(cantidad, precioUnitario, config.TipoImpuesto || 'A');
                 total += valorTotal;
                 totalITBIS += itbis;
-                doc.font('Helvetica').fontSize(8);
+                doc.font('Helvetica').fontSize(9);
                 // Product name split into two lines
                 const maxProductWidth = 90;
-                const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 8);
+                const productLines = splitTextIntoTwoLines(item.Producto.NombreP, maxProductWidth, 9);
                 // First line of product name
                 doc.text(productLines[0], margin, currentY);
                 // Right align ITBIS and VALOR on first line
@@ -792,7 +792,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 // Presentation, quantity and unit price on next line
                 const presentacion = item.Producto.PresentacionP || 'Unidad';
                 const detalleLinea = `(${presentacion}) - ${cantidad} x ${formatCurrency(precioUnitario).replace('RD$', '')}`;
-                doc.fontSize(7).text(detalleLinea, margin, currentY);
+                doc.fontSize(9).text(detalleLinea, margin, currentY);
                 currentY += 15; // Extra spacing between products
             });
             // Totals
@@ -811,7 +811,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             rightAlignText(`TOTAL: ${formatCurrency(total).replace('RD$', '')}`, currentY);
             currentY += 20;
             // Footer
-            doc.font('Helvetica').fontSize(7);
+            doc.font('Helvetica').fontSize(9);
             doc.text(`Impreso: ${formatDateTime(new Date())}`, margin, currentY, center);
         }
         else {
