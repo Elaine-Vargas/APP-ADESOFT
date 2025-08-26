@@ -748,7 +748,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 8;
             // Column headers for thermal
-            doc.font('Helvetica-Bold').fontSize(8);
+            doc.font('Helvetica-Bold').fontSize(10);
             doc.text('PRODUCTO', margin, currentY);
             // Right align ITBIS and VALOR headers
             const itbisHeader = 'ITBIS';
@@ -803,7 +803,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 const textWidth = doc.widthOfString(text);
                 doc.text(text, margin + contentWidth - textWidth, y);
             };
-            doc.font('Helvetica-Bold').fontSize(8);
+            doc.font('Helvetica-Bold').fontSize(11);
             rightAlignText(`SUBTOTAL: ${formatCurrency(total - totalITBIS).replace('RD$', '')}`, currentY);
             currentY += 12;
             rightAlignText(`ITBIS: ${formatCurrency(totalITBIS).replace('RD$', '')}`, currentY);
