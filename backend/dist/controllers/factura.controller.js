@@ -327,7 +327,7 @@ const generateFacturaTransaccionIN = async (req, res) => {
             // Total
             doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
             currentY += 10;
-            doc.font('Helvetica-Bold').fontSize(9);
+            doc.font('Helvetica-Bold').fontSize(12);
             doc.text('TOTAL PAGADO:', margin, currentY);
             const totalText = formatCurrency(transaccion.Valor || 0).replace('RD$', '').trim();
             const totalX = margin + contentWidth - doc.widthOfString(totalText);
@@ -803,7 +803,7 @@ const generateFacturaPDFWithSize = async (req, res) => {
                 const textWidth = doc.widthOfString(text);
                 doc.text(text, margin + contentWidth - textWidth, y);
             };
-            doc.font('Helvetica-Bold').fontSize(11);
+            doc.font('Helvetica-Bold').fontSize(12);
             rightAlignText(`SUBTOTAL: ${formatCurrency(total - totalITBIS).replace('RD$', '')}`, currentY);
             currentY += 12;
             rightAlignText(`ITBIS: ${formatCurrency(totalITBIS).replace('RD$', '')}`, currentY);
