@@ -10,7 +10,7 @@ import referenciaPagoRoutes from './routes/referenciapago.routes';
 import rutasRoutes from './routes/rutas.routes';
 import zonasRoutes from './routes/zonas.routes';
 import facturaRoutes from './routes/factura.routes';
-
+import dashboardRoutes from './routes/dashboard.routes';
 import cors from 'cors';
 
 const app = express();
@@ -28,6 +28,7 @@ app.use('/api/referencias-pago', referenciaPagoRoutes);
 app.use('/api/rutas', rutasRoutes);
 app.use('/api/zonas', zonasRoutes);
 app.use('/api/facturas', facturaRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 const PORT = process.env.PORT;
 app.listen(PORT, () => {

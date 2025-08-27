@@ -15,6 +15,7 @@ const referenciapago_routes_1 = __importDefault(require("./routes/referenciapago
 const rutas_routes_1 = __importDefault(require("./routes/rutas.routes"));
 const zonas_routes_1 = __importDefault(require("./routes/zonas.routes"));
 const factura_routes_1 = __importDefault(require("./routes/factura.routes"));
+const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"));
 const cors_1 = __importDefault(require("cors"));
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
@@ -30,6 +31,7 @@ app.use('/api/referencias-pago', referenciapago_routes_1.default);
 app.use('/api/rutas', rutas_routes_1.default);
 app.use('/api/zonas', zonas_routes_1.default);
 app.use('/api/facturas', factura_routes_1.default);
+app.use('/api/dashboard', dashboard_routes_1.default);
 const PORT = process.env.PORT;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en el puerto ${PORT}`);
