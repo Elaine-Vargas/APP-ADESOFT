@@ -8,7 +8,7 @@ datasource db {
 }
 
 model Producto {
-  IdProducto    Int         @id
+  IdProducto    Int         @id @default(autoincrement())
   CodigoP       String      @db.VarChar(20)
   ReferenciaP   String?     @db.VarChar(20)
   PresentacionP String?     @db.VarChar(20)
@@ -29,8 +29,6 @@ model Vendedor {
   TelefonoV      String?          @db.Char(50)
   IdRuta         String?          @db.VarChar(6)
   FechaSinc      DateTime?        @db.Timestamp(0)
-  Activo         Int?             @db.TinyInt
-  Vendedor       Int              @default(1) @db.TinyInt
   Orden          Orden[]
   ReferenciaPago ReferenciaPago[]
   Transaccion    Transaccion[]
@@ -138,13 +136,13 @@ model ReferenciaPago {
   IdVendedor   String?     @db.VarChar(6)
   ValorPago    Float       @db.Float
   CreatedAt    DateTime?   @default(now()) @db.Timestamp(0)
+  Transaccion  Transaccion @relation(fields: [IdTransa], references: [IdTransa], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_1")
   Cliente      Cliente?    @relation(fields: [IdCliente], references: [IdCliente], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_2")
   Vendedor     Vendedor?   @relation(fields: [IdVendedor], references: [IdVendedor], onDelete: NoAction, onUpdate: NoAction, map: "ReferenciaPago_ibfk_3")
-  Transaccion  Transaccion @relation(fields: [IdTransa], references: [IdTransa], onDelete: Cascade, onUpdate: NoAction, map: "ReferenciaPago_ibfk_1")
 
+  @@index([IdTransa], map: "IdTransa")
   @@index([IdCliente], map: "IdCliente")
   @@index([IdVendedor], map: "IdVendedor")
-  @@index([IdTransa], map: "fk_referenciapago_transaccion")
 }
 
 model Rutas {
