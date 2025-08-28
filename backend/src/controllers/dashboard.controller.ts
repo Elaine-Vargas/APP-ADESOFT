@@ -9,26 +9,41 @@ interface DateRange {
 }
 
 const formatDateToUTC = (date: Date): Date => {
-  // Returns a new date with time set to 00:00:00 in UTC
-  return new Date(Date.UTC(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate()
-  ));
+  // Create a new date in local time
+  const localDate = new Date(date);
+  // Return a new date with the same year, month, and date in local time
+  return new Date(
+    localDate.getFullYear(),
+    localDate.getMonth(),
+    localDate.getDate()
+  );
 };
+
 export const getSellerStats = async (req: Request, res: Response) => {
   try {
     const { VendedorId } = req.params;
-    const { startDate, endDate } = req.query as unknown as DateRange;
+    let { startDate, endDate } = req.query as unknown as DateRange;
 
-    // Set default dates if not provided and format to UTC
-    const start = startDate ? formatDateToUTC(new Date(startDate)) : formatDateToUTC(new Date());
-    const end = endDate ? formatDateToUTC(new Date(endDate)) : formatDateToUTC(new Date());
+    // If no dates provided, set both to today
+    if (!startDate && !endDate) {
+      const today = new Date().toISOString().split('T')[0];
+      startDate = today;
+      endDate = today;
+    }
+
+    // Parse dates
+    const start = new Date(startDate || '');
+    const end = new Date(endDate || '');
+
+    // Set time to start of day for start date (00:00:00)
+    const startOfDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     
-    // For the end date, we want to include the entire day
-    const endOfDay = new Date(end);
-    endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
-    endOfDay.setUTCMilliseconds(-1);
+    // Set time to end of day for end date (23:59:59.999)
+    const endOfDay = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
+
+    // Format to UTC for database queries
+    const startUTC = formatDateToUTC(startOfDay);
+    const endUTC = formatDateToUTC(endOfDay);
 
     // Get seller information including Vendedor type
     const seller = await prisma.vendedor.findUnique({
@@ -47,26 +62,33 @@ export const getSellerStats = async (req: Request, res: Response) => {
     // Base where clause for date filtering
     const dateFilter = {
       Fecha: {
-        gte: start,
-        lte: endOfDay
+        gte: startUTC,
+        lte: endUTC
       }
     };
 
     // Get order count for the date range
     const orderWhereClause = {
       ...dateFilter,
-      ...(seller.Vendedor === 1 ? { IdVendedor: VendedorId } : {})
+      IdVendedor: VendedorId
     };
 
     const orderCount = await prisma.orden.count({
       where: orderWhereClause
     });
 
+    const orderIncome = await prisma.orden.aggregate({
+      where: {
+        ...dateFilter,
+        IdVendedor: VendedorId
+      },
+      _sum: { Total: true }
+    });
     // Get income transactions for the date range
     const transactionsWhereClause = {
       ...dateFilter,
-      Tipo: 'IN' as const,  // Use 'as const' to ensure type safety with Prisma enum
-      ...(seller.Vendedor === 1 ? { IdVendedor: VendedorId } : {})
+      Tipo: 'IN' as const,
+      IdVendedor: VendedorId  // Always filter by the specific seller
     };
 
     const incomeTransactions = await prisma.transaccion.findMany({
@@ -103,6 +125,10 @@ export const getSellerStats = async (req: Request, res: Response) => {
       return sum + (transaction.Valor || 0);
     }, 0);
 
+    // Prepare response with the exact requested dates
+    const responseStartDate = startDate ? startDate.split('T')[0] : new Date().toISOString().split('T')[0];
+    const responseEndDate = endDate ? endDate.split('T')[0] : new Date().toISOString().split('T')[0];
+
     // Prepare response
     const response: any = {
       vendedor: {
@@ -111,20 +137,20 @@ export const getSellerStats = async (req: Request, res: Response) => {
         tipo: seller.Vendedor === 1 ? 'Exclusivo' : 'General'
       },
       periodo: {
-        inicio: start.toISOString().split('T')[0],
-        fin: end.toISOString().split('T')[0]
+        inicio: responseStartDate,
+        fin: responseEndDate
       },
       estadisticas: {
         cotizaciones: orderCount,
-        transacciones: incomeTransactions.length,
-        ingresos: totalIncome,
+        valorCotizaciones: orderIncome._sum.Total || 0,
+        ingresos: incomeTransactions.length,
+        valorIngresos: totalIncome,
       },
       transacciones: processedTransactions
     };
 
     // If seller is general, get statistics for other sellers
     if (seller.Vendedor !== 1) {
-      console.log('Fetching other sellers...');
       // First, get all other sellers
       const allSellers = await prisma.vendedor.findMany({
         where: {
@@ -138,12 +164,11 @@ export const getSellerStats = async (req: Request, res: Response) => {
           NombreV: true
         }
       });
-      console.log('All active sellers:', JSON.stringify(allSellers, null, 2));
 
       // Then get their transaction stats
       const otherSellersStats = await Promise.all(
         allSellers.map(async (seller) => {
-          const [stats, orderCount] = await Promise.all([
+          const [stats, orderStats] = await Promise.all([
             prisma.transaccion.aggregate({
               where: {
                 ...dateFilter,
@@ -153,41 +178,36 @@ export const getSellerStats = async (req: Request, res: Response) => {
               _sum: { Valor: true },
               _count: { _all: true }
             }),
-            prisma.orden.count({
+            prisma.orden.aggregate({
               where: {
                 ...dateFilter,
                 IdVendedor: seller.IdVendedor
-              }
+              },
+              _sum: { Total: true },
+              _count: { _all: true }
             })
           ]);
-
 
           return {
             id: seller.IdVendedor,
             nombre: seller.NombreV,
-            transacciones: stats._count._all,
-            ingresos: stats._sum.Valor || 0,
-            cotizaciones: orderCount
+            cotizaciones: orderStats._count._all,
+            valorCotizaciones: orderStats._sum.Total || 0,
+            ingresos: stats._count._all,
+            valorIngresos: stats._sum.Valor || 0,
           };
         })
       );
 
-      console.log('All sellers with stats:', JSON.stringify(otherSellersStats, null, 2));
       
       // Add other sellers' statistics to the response
-      const filteredSellers = otherSellersStats.filter(seller => seller.transacciones > 0 || seller.cotizaciones > 0);
+      const filteredSellers = otherSellersStats.filter(seller => seller.ingresos > 0 || seller.cotizaciones > 0);
       response.otrosVendedores = filteredSellers;
       
-      console.log('Final response with otrosVendedores:', JSON.stringify({
-        ...response,
-        otrosVendedores: filteredSellers
-      }, null, 2));
     }
-
     res.json(response);
   } catch (error) {
     console.error('Error en getSellerStats:', error);
     res.status(500).json({ error: 'Error al obtener estadísticas del vendedor' });
   }
 };
-
