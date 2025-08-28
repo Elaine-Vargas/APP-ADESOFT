@@ -108,7 +108,7 @@ const getSellerStats = async (req, res) => {
             vendedor: {
                 id: seller.IdVendedor,
                 nombre: seller.NombreV,
-                tipo: seller.Vendedor === 1 ? 'Exclusivo' : 'General'
+                tipo: seller.Vendedor === 1 ? 'Vendedor' : 'Administrador'
             },
             periodo: {
                 inicio: responseStartDate,
