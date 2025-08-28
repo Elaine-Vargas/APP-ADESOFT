@@ -84,6 +84,7 @@ export const getSellerStats = async (req: Request, res: Response) => {
       },
       _sum: { Total: true }
     });
+
     // Get income transactions for the date range
     const transactionsWhereClause = {
       ...dateFilter,
@@ -129,12 +130,15 @@ export const getSellerStats = async (req: Request, res: Response) => {
     const responseStartDate = startDate ? startDate.split('T')[0] : new Date().toISOString().split('T')[0];
     const responseEndDate = endDate ? endDate.split('T')[0] : new Date().toISOString().split('T')[0];
 
+    // Determine if seller is admin (assuming Vendedor = 0 means admin, 1 means regular seller)
+    const isAdmin = seller.Vendedor === 0;
+
     // Prepare response
     const response: any = {
       vendedor: {
         id: seller.IdVendedor,
         nombre: seller.NombreV,
-        tipo: seller.Vendedor === 1 ? 'Vendedor' : 'Administrador'
+        tipo: isAdmin ? 'Administrador' : 'Vendedor'
       },
       periodo: {
         inicio: responseStartDate,
@@ -149,62 +153,158 @@ export const getSellerStats = async (req: Request, res: Response) => {
       transacciones: processedTransactions
     };
 
-    // If seller is general, get statistics for other sellers
-    if (seller.Vendedor !== 1) {
-      // First, get all other sellers
+    // If seller is admin, get statistics for ALL other sellers
+    if (isAdmin) {
+      console.log(`=== ADMINISTRADOR DETECTADO: ${seller.NombreV} (${VendedorId}) ===`);
+      console.log(`Rango de fechas: ${startUTC} a ${endUTC}`);
+      
+      // Debug: First check what sellers exist in the database
+      const allSellersInDB = await prisma.vendedor.findMany({
+        select: {
+          IdVendedor: true,
+          NombreV: true,
+          Vendedor: true,
+        },
+        orderBy: {
+          IdVendedor: 'asc'
+        }
+      });
+      
+      console.log('\n=== TODOS LOS VENDEDORES EN LA BD ===');
+      allSellersInDB.forEach(s => {
+        console.log(`${s.IdVendedor} - ${s.NombreV} - Tipo: ${s.Vendedor === 0 ? 'Admin' : 'Vendedor'}`);
+      });
+
+      // Debug: Check orders in date range for ALL sellers
+      const ordersInRange = await prisma.orden.findMany({
+        where: {
+          Fecha: {
+            gte: startUTC,
+            lte: endUTC
+          }
+        },
+        select: {
+          IdVendedor: true,
+          Total: true,
+          Fecha: true
+        }
+      });
+
+      console.log('\n=== ÓRDENES EN EL RANGO DE FECHAS ===');
+      const ordersByVendor = ordersInRange.reduce((acc: any, order) => {
+        if (!acc[order.IdVendedor]) {
+          acc[order.IdVendedor] = { count: 0, total: 0 };
+        }
+        acc[order.IdVendedor].count++;
+        acc[order.IdVendedor].total += order.Total || 0;
+        return acc;
+      }, {});
+
+      Object.keys(ordersByVendor).forEach(vendorId => {
+        console.log(`${vendorId}: ${ordersByVendor[vendorId].count} órdenes, Total: ${ordersByVendor[vendorId].total}`);
+      });
+
+      // Debug: Check transactions in date range for ALL sellers
+      const transactionsInRange = await prisma.transaccion.findMany({
+        where: {
+          Fecha: {
+            gte: startUTC,
+            lte: endUTC
+          },
+          Tipo: 'IN'
+        },
+        select: {
+          IdVendedor: true,
+          Valor: true,
+          Fecha: true
+        }
+      });
+
+      console.log('\n=== TRANSACCIONES IN EN EL RANGO DE FECHAS ===');
+      const transactionsByVendor = transactionsInRange.reduce((acc: any, transaction) => {
+        if (!acc[transaction.IdVendedor]) {
+          acc[transaction.IdVendedor] = { count: 0, total: 0 };
+        }
+        acc[transaction.IdVendedor].count++;
+        acc[transaction.IdVendedor].total += transaction.Valor || 0;
+        return acc;
+      }, {});
+
+      Object.keys(transactionsByVendor).forEach(vendorId => {
+        console.log(`${vendorId}: ${transactionsByVendor[vendorId].count} transacciones, Total: ${transactionsByVendor[vendorId].total}`);
+      });
+
+      // Now get active sellers excluding current one
       const allSellers = await prisma.vendedor.findMany({
         where: {
           NOT: {
             IdVendedor: VendedorId
           },
-          Activo: 1  // Only active sellers
         },
         select: {
           IdVendedor: true,
-          NombreV: true
+          NombreV: true,
+          Vendedor: true
+        },
+        orderBy: {
+          IdVendedor: 'asc'
         }
       });
 
-      // Then get their transaction stats
-      const otherSellersStats = await Promise.all(
-        allSellers.map(async (seller) => {
-          const [stats, orderStats] = await Promise.all([
-            prisma.transaccion.aggregate({
-              where: {
-                ...dateFilter,
-                Tipo: 'IN' as const,
-                IdVendedor: seller.IdVendedor
-              },
-              _sum: { Valor: true },
-              _count: { _all: true }
-            }),
-            prisma.orden.aggregate({
-              where: {
-                ...dateFilter,
-                IdVendedor: seller.IdVendedor
-              },
-              _sum: { Total: true },
-              _count: { _all: true }
-            })
-          ]);
+      console.log(`\n=== VENDEDORES ACTIVOS (EXCLUYENDO ${VendedorId}) ===`);
+      console.log(`Encontrados ${allSellers.length} vendedores activos`);
+      allSellers.forEach(s => {
+        console.log(`${s.IdVendedor} - ${s.NombreV}`);
+      });
 
-          return {
-            id: seller.IdVendedor,
-            nombre: seller.NombreV,
-            cotizaciones: orderStats._count._all,
-            valorCotizaciones: orderStats._sum.Total || 0,
-            ingresos: stats._count._all,
-            valorIngresos: stats._sum.Valor || 0,
-          };
-        })
-      );
+      // Get stats for each seller
+      const otherSellersStats = [];
+      
+      for (const sellerInfo of allSellers) {
+        console.log(`\n--- Procesando: ${sellerInfo.NombreV} (${sellerInfo.IdVendedor}) ---`);
+        
+        const orderCount = ordersByVendor[sellerInfo.IdVendedor]?.count || 0;
+        const orderTotal = ordersByVendor[sellerInfo.IdVendedor]?.total || 0;
+        const transactionCount = transactionsByVendor[sellerInfo.IdVendedor]?.count || 0;
+        const transactionTotal = transactionsByVendor[sellerInfo.IdVendedor]?.total || 0;
 
+        const vendedorStats = {
+          id: sellerInfo.IdVendedor,
+          nombre: sellerInfo.NombreV,
+          tipo: sellerInfo.Vendedor === 0 ? 'Administrador' : 'Vendedor',
+          cotizaciones: orderCount,
+          valorCotizaciones: orderTotal,
+          ingresos: transactionCount,
+          valorIngresos: transactionTotal,
+        };
+
+        console.log(`Resultado para ${sellerInfo.NombreV}:`, vendedorStats);
+        
+        const hasActivity = vendedorStats.ingresos > 0 || vendedorStats.cotizaciones > 0;
+        console.log(`¿Tiene actividad? ${hasActivity}`);
+        
+        if (hasActivity) {
+          otherSellersStats.push(vendedorStats);
+          console.log(`✓ AGREGADO A LA LISTA`);
+        } else {
+          console.log(`✗ NO AGREGADO (sin actividad)`);
+        }
+      }
+
+      console.log(`\n=== RESULTADO FINAL ===`);
+      console.log(`Total vendedores con actividad: ${otherSellersStats.length}`);
+      otherSellersStats.forEach(seller => {
+        console.log(`✓ ${seller.id} - ${seller.nombre} (C:${seller.cotizaciones}, I:${seller.ingresos})`);
+      });
+
+      response.otrosVendedores = otherSellersStats;
       
-      // Add other sellers' statistics to the response
-      const filteredSellers = otherSellersStats.filter(seller => seller.ingresos > 0 || seller.cotizaciones > 0);
-      response.otrosVendedores = filteredSellers;
-      
+    } else {
+      console.log(`=== VENDEDOR REGULAR: ${seller.NombreV} (${VendedorId}) ===`);
+      console.log('No se incluyen otros vendedores');
     }
+
+    console.log('Respuesta final:', JSON.stringify(response, null, 2));
     res.json(response);
   } catch (error) {
     console.error('Error en getSellerStats:', error);
